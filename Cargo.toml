@@ -1,0 +1,26 @@
+[package]
+name = "ddrs"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Dynamic DNS client"
+homepage = "https://github.com/jakewmeyer/ddrs"
+repository = "https://github.com/jakewmeyer/ddrs"
+documentation = "https://docs.rs/ddrs"
+keywords = ["ddns", "dynamic-dns", "ddclient", "dns", "networking"]
+categories = ["command-line-utilities", "network-programming"]
+readme = "README.md"
+
+[dependencies]
+async-trait = "0.1.77"
+clap = { version = "4.4.18", features = ["derive"] }
+dirs = "5.0.1"
+figment = { version = "0.10.14", features = ["toml"] }
+hickory-resolver = "0.24.0"
+miette = { version = "5.10.0", features = ["fancy"] }
+reqwest = { version = "0.11.24", features = ["rustls-tls"] }
+serde = { version = "1.0.196", features = ["serde_derive"] }
+stun = "0.5.0"
+thiserror = "1.0.56"
+tokio = { version = "1.35.1", features = ["full"] }
+tracing = { version = "0.1.40", features = ["log"] }
