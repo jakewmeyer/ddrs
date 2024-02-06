@@ -7,29 +7,32 @@ use std::{ffi::OsString, path::Path};
 use clap::Parser;
 use client::Client;
 use figment::{
-    providers::{Format, Toml},
+    providers::{Format, Serialized, Toml},
     Figment,
 };
 use miette::{miette, IntoDiagnostic, Result};
+use tokio::signal;
+use tracing::{error, info};
 
 use crate::config::Config;
 
-const CONFIG_PATH: &str = "/ddrs/config.toml";
+const CONFIG_PATH: &str = "ddrs/config.toml";
 
 mod client;
 mod config;
 mod error;
+mod providers;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    // Config file path
     #[arg(short, long)]
     config: Option<OsString>,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    tracing_subscriber::fmt::init();
     let args = Args::parse();
     let config_path = match args.config {
         Some(path) => Path::new(&path)
@@ -45,16 +48,49 @@ async fn main() -> Result<()> {
             .ok_or_else(|| miette!("Invalid config path"))?
             .to_string(),
     };
-    let config: Config = Figment::new()
+
+    let config: Config = Figment::from(Serialized::defaults(Config::default()))
         .merge(Toml::file(config_path))
         .extract()
         .into_diagnostic()?;
 
     let client = Client::new(config);
-    let ip = client
-        .fetch_ip_stun(client::Version::V4)
-        .await
-        .into_diagnostic()?;
-    println!("IP: {ip}");
+
+    // Handle SIGINT
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    // Handle SIGTERM
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to install signal handler")
+            .recv()
+            .await;
+    };
+
+    let handle = tokio::spawn(async move { client.run().await.into_diagnostic() });
+
+    match handle.await {
+        Ok(Ok(())) => {
+            error!("Client exited successfully");
+        }
+        Ok(Err(e)) => {
+            error!("Client error occurred: {}", e);
+        }
+        Err(e) => {
+            error!("Task error occurred: {}", e);
+        }
+    }
+
+    tokio::select! {
+        () = ctrl_c => {},
+        () = terminate => {},
+    }
+
+    info!("Shutting down client...");
+
     Ok(())
 }

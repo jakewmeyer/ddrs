@@ -1,7 +1,9 @@
 use hickory_resolver::TokioAsyncResolver;
 use hickory_resolver::{name_server::TokioConnectionProvider, AsyncResolver};
+use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
+use tokio::time;
 
 use hickory_resolver::config::LookupIpStrategy;
 use hickory_resolver::config::{ResolverConfig, ResolverOpts};
@@ -15,12 +17,20 @@ use tracing::error;
 use crate::config::Config;
 use crate::error::Error;
 
-const STUN_SERVER: &str = "stun.l.google.com";
-const STUN_PORT: u16 = 19302;
-
-pub enum Version {
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IpVersion {
     V4,
     V6,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IpSource {
+    Stun,
+    Http,
+    Interface,
+    Static,
 }
 
 #[derive(Debug)]
@@ -37,8 +47,8 @@ impl Client {
         Self { config, resolver }
     }
 
-    pub async fn fetch_ip_stun(&self, version: Version) -> Result<IpAddr, Error> {
-        let (v4, v6) = match &self.resolver.lookup_ip(STUN_SERVER).await {
+    async fn fetch_ip_stun(&self, version: IpVersion) -> Result<IpAddr, Error> {
+        let (v4, v6) = match &self.resolver.lookup_ip(&self.config.stun_server).await {
             Ok(response) => {
                 let v4 = response.iter().find_map(|ip| match ip {
                     IpAddr::V4(v4) => Some(v4),
@@ -58,17 +68,17 @@ impl Client {
         let (handler_tx, mut handler_rx) = tokio::sync::mpsc::unbounded_channel();
         let conn = UdpSocket::bind("0:0").await?;
         let stun_ip = match version {
-            Version::V4 => {
+            IpVersion::V4 => {
                 if let Some(v4) = v4 {
-                    SocketAddr::new(IpAddr::V4(v4), STUN_PORT)
+                    SocketAddr::new(IpAddr::V4(v4), self.config.stun_port)
                 } else {
                     error!("Failed to create ipv4 socket address for STUN server");
                     return Err(Error::Unknown);
                 }
             }
-            Version::V6 => {
+            IpVersion::V6 => {
                 if let Some(v6) = v6 {
-                    SocketAddr::new(IpAddr::V6(v6), STUN_PORT)
+                    SocketAddr::new(IpAddr::V6(v6), self.config.stun_port)
                 } else {
                     error!("Failed to create ipv6 socket address for STUN server");
                     return Err(Error::Unknown);
@@ -93,6 +103,30 @@ impl Client {
         } else {
             client.close().await?;
             Err(Error::Unknown)
+        }
+    }
+
+    async fn fetch_ip_http(&self, version: IpVersion) -> Result<IpAddr, Error> {
+        let urls = match version {
+            IpVersion::V4 => &self.config.http_ipv4,
+            IpVersion::V6 => &self.config.http_ipv6,
+        };
+        for url in urls {
+            let response = reqwest::get(url).await?;
+            if let Ok(ip) = response.text().await {
+                if let Ok(ip) = ip.trim().parse() {
+                    return Ok(ip);
+                }
+            }
+        }
+        Err(Error::Unknown)
+    }
+
+    pub async fn run(&self) -> Result<(), Error> {
+        let mut interval = time::interval(self.config.interval);
+        loop {
+            interval.tick().await;
+            todo!("Fetch IP, check if it changed, and update DNS if needed")
         }
     }
 }

@@ -8,6 +8,9 @@ pub enum Error {
     #[error("IO error")]
     Io(#[from] std::io::Error),
 
+    #[error("Request error")]
+    Request(#[from] reqwest::Error),
+
     #[error("Unknown error")]
     Unknown,
 }
