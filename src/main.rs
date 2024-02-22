@@ -1,8 +1,8 @@
 #![deny(clippy::all)]
-#![deny(clippy::pedantic)]
+// #![deny(clippy::pedantic)]
 #![forbid(unsafe_code)]
 
-use std::{ffi::OsString, path::Path};
+use std::{ffi::OsString, path::Path, sync::Arc};
 
 use clap::Parser;
 use client::Client;
@@ -12,7 +12,7 @@ use figment::{
 };
 use miette::{miette, IntoDiagnostic, Result};
 use tokio::signal;
-use tracing::{error, info};
+use tracing::info;
 
 use crate::config::Config;
 
@@ -54,7 +54,7 @@ async fn main() -> Result<()> {
         .extract()
         .into_diagnostic()?;
 
-    let client = Client::new(config);
+    let client = Arc::new(Client::new(config));
 
     // Handle SIGINT
     let ctrl_c = async {
@@ -71,24 +71,18 @@ async fn main() -> Result<()> {
             .await;
     };
 
-    let handle = tokio::spawn(async move { client.run().await.into_diagnostic() });
-
-    match handle.await {
-        Ok(Ok(())) => {
-            error!("Client exited successfully");
-        }
-        Ok(Err(e)) => {
-            error!("Client error occurred: {}", e);
-        }
-        Err(e) => {
-            error!("Task error occurred: {}", e);
-        }
-    }
+    let spawn_client = client.clone();
+    let run_client = client.clone();
+    spawn_client
+        .tracker
+        .spawn(async move { run_client.run().await.into_diagnostic() });
 
     tokio::select! {
         () = ctrl_c => {},
         () = terminate => {},
     }
+
+    client.shutdown().await;
 
     info!("Shutting down client...");
 

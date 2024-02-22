@@ -1,9 +1,13 @@
+use async_trait::async_trait;
 use hickory_resolver::TokioAsyncResolver;
 use hickory_resolver::{name_server::TokioConnectionProvider, AsyncResolver};
 use serde::{Deserialize, Serialize};
-use std::net::{IpAddr, SocketAddr};
+use std::fmt::Debug;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use tokio::time;
+use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 
 use hickory_resolver::config::LookupIpStrategy;
 use hickory_resolver::config::{ResolverConfig, ResolverOpts};
@@ -25,30 +29,65 @@ pub enum IpVersion {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+pub struct IpSourceInterface {
+    interface: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct IpSourceStatic {
+    address: IpAddr,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "type")]
 pub enum IpSource {
     Stun,
     Http,
-    Interface,
-    Static,
+    Interface(IpSourceInterface),
+    Static(IpSourceStatic),
+}
+
+#[derive(Debug)]
+pub struct IpUpdate {
+    v4: Option<Ipv4Addr>,
+    v6: Option<Ipv6Addr>,
+}
+
+#[async_trait]
+#[typetag::serde(tag = "type")]
+pub trait Provider: Debug + Send + Sync {
+    async fn update(&self, update: IpUpdate) -> Result<bool, Error>;
 }
 
 #[derive(Debug)]
 pub struct Client {
     config: Config,
     resolver: AsyncResolver<TokioConnectionProvider>,
+    cache: Option<IpAddr>,
+    shutdown: CancellationToken,
+    pub tracker: TaskTracker,
 }
 
 impl Client {
-    pub fn new(config: Config) -> Self {
+    pub fn new(config: Config) -> Client {
         let mut opts = ResolverOpts::default();
         opts.ip_strategy = LookupIpStrategy::Ipv4AndIpv6;
         let resolver = TokioAsyncResolver::tokio(ResolverConfig::default(), opts);
-        Self { config, resolver }
+        Client {
+            config,
+            resolver,
+            cache: None,
+            shutdown: CancellationToken::new(),
+            tracker: TaskTracker::new(),
+        }
     }
 
     async fn fetch_ip_stun(&self, version: IpVersion) -> Result<IpAddr, Error> {
-        let (v4, v6) = match &self.resolver.lookup_ip(&self.config.stun_server).await {
+        let (v4, v6) = match &self
+            .resolver
+            .lookup_ip(self.config.stun_server.as_str())
+            .await
+        {
             Ok(response) => {
                 let v4 = response.iter().find_map(|ip| match ip {
                     IpAddr::V4(v4) => Some(v4),
@@ -112,7 +151,7 @@ impl Client {
             IpVersion::V6 => &self.config.http_ipv6,
         };
         for url in urls {
-            let response = reqwest::get(url).await?;
+            let response = reqwest::get(url.as_str()).await?;
             if let Ok(ip) = response.text().await {
                 if let Ok(ip) = ip.trim().parse() {
                     return Ok(ip);
@@ -125,8 +164,29 @@ impl Client {
     pub async fn run(&self) -> Result<(), Error> {
         let mut interval = time::interval(self.config.interval);
         loop {
-            interval.tick().await;
-            todo!("Fetch IP, check if it changed, and update DNS if needed")
+            tokio::select! {
+                biased;
+                () = self.shutdown.cancelled() => {
+                    break;
+                }
+                _ = interval.tick() => {
+                    // If they are different, update DNS
+                    for provider in &self.config.domains {
+                        let update = IpUpdate {
+                            v4: None,
+                            v6: None,
+                        };
+                        provider.update(update).await?;
+                    }
+                },
+            }
         }
+        Ok(())
+    }
+
+    pub async fn shutdown(&self) {
+        self.shutdown.cancel();
+        self.tracker.close();
+        self.tracker.wait().await;
     }
 }
