@@ -1,0 +1,18 @@
+versions = ["v4", "v6"]
+interval = "10s"
+
+[source]
+type = "stun"
+
+[[providers]]
+type = "cloudflare"
+host = "example.com"
+api_key = "API_KEY_HERE"
+proxied = false
+ttl = 0
+
+[[providers]]
+type = "dyndns"
+host = "example.com"
+username = "user"
+password = "pass"
