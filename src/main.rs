@@ -1,5 +1,5 @@
 #![deny(clippy::all)]
-// #![deny(clippy::pedantic)]
+#![deny(clippy::pedantic)]
 #![forbid(unsafe_code)]
 
 use std::{ffi::OsString, path::Path, sync::Arc};
