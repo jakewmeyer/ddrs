@@ -171,7 +171,7 @@ impl Client {
                 }
                 _ = interval.tick() => {
                     // If they are different, update DNS
-                    for provider in &self.config.domains {
+                    for provider in &self.config.providers {
                         let update = IpUpdate {
                             v4: None,
                             v6: None,

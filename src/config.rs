@@ -15,7 +15,7 @@ pub struct Config {
     pub stun_port: u16,
     pub http_ipv4: SmallVec<[String; 3]>,
     pub http_ipv6: SmallVec<[String; 3]>,
-    pub domains: SmallVec<[Box<dyn Provider>; 3]>,
+    pub providers: SmallVec<[Box<dyn Provider>; 3]>,
 }
 
 impl Default for Config {
@@ -36,7 +36,7 @@ impl Default for Config {
                 String::from("https://ipv6.icanhazip.com"),
                 String::from("https://ipv6.seeip.org"),
             ],
-            domains: smallvec![],
+            providers: smallvec![],
         }
     }
 }
