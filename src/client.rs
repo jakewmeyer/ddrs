@@ -1,6 +1,4 @@
 use async_trait::async_trait;
-use hickory_resolver::TokioAsyncResolver;
-use hickory_resolver::{name_server::TokioConnectionProvider, AsyncResolver};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -9,13 +7,11 @@ use tokio::time;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
-use hickory_resolver::config::LookupIpStrategy;
-use hickory_resolver::config::{ResolverConfig, ResolverOpts};
 use stun::agent::TransactionId;
 use stun::client::ClientBuilder;
 use stun::message::{Getter, Message, BINDING_REQUEST};
 use stun::xoraddr::XorMappedAddress;
-use tokio::net::UdpSocket;
+use tokio::net::{lookup_host, UdpSocket};
 use tracing::error;
 
 use crate::config::Config;
@@ -62,62 +58,37 @@ pub trait Provider: Debug + Send + Sync {
 #[derive(Debug)]
 pub struct Client {
     config: Config,
-    resolver: AsyncResolver<TokioConnectionProvider>,
-    cache: Option<IpAddr>,
+    cache: IpUpdate,
     shutdown: CancellationToken,
     pub tracker: TaskTracker,
 }
 
 impl Client {
     pub fn new(config: Config) -> Client {
-        let mut opts = ResolverOpts::default();
-        opts.ip_strategy = LookupIpStrategy::Ipv4AndIpv6;
-        let resolver = TokioAsyncResolver::tokio(ResolverConfig::default(), opts);
         Client {
             config,
-            resolver,
-            cache: None,
+            cache: IpUpdate { v4: None, v6: None },
             shutdown: CancellationToken::new(),
             tracker: TaskTracker::new(),
         }
     }
 
     async fn fetch_ip_stun(&self, version: IpVersion) -> Result<IpAddr, Error> {
-        let (v4, v6) = match &self
-            .resolver
-            .lookup_ip(self.config.stun_server.as_str())
-            .await
-        {
-            Ok(response) => {
-                let v4 = response.iter().find_map(|ip| match ip {
-                    IpAddr::V4(v4) => Some(v4),
-                    IpAddr::V6(_) => None,
-                });
-                let v6 = response.iter().find_map(|ip| match ip {
-                    IpAddr::V6(v6) => Some(v6),
-                    IpAddr::V4(_) => None,
-                });
-                (v4, v6)
-            }
-            Err(e) => {
-                error!("Failed to resolve STUN server: {}", e);
-                (None, None)
-            }
-        };
+        let resolved = resolve_host(&self.config.stun_addr).await?;
         let (handler_tx, mut handler_rx) = tokio::sync::mpsc::unbounded_channel();
         let conn = UdpSocket::bind("0:0").await?;
         let stun_ip = match version {
             IpVersion::V4 => {
-                if let Some(v4) = v4 {
-                    SocketAddr::new(IpAddr::V4(v4), self.config.stun_port)
+                if let Some(v4) = resolved.v4 {
+                    SocketAddr::new(IpAddr::V4(v4), resolved.port)
                 } else {
                     error!("Failed to create ipv4 socket address for STUN server");
                     return Err(Error::Unknown);
                 }
             }
             IpVersion::V6 => {
-                if let Some(v6) = v6 {
-                    SocketAddr::new(IpAddr::V6(v6), self.config.stun_port)
+                if let Some(v6) = resolved.v6 {
+                    SocketAddr::new(IpAddr::V6(v6), resolved.port)
                 } else {
                     error!("Failed to create ipv6 socket address for STUN server");
                     return Err(Error::Unknown);
@@ -170,7 +141,9 @@ impl Client {
                     break;
                 }
                 _ = interval.tick() => {
-                    // If they are different, update DNS
+                    let _ip = self.fetch_ip_stun(IpVersion::V4).await?;
+                    // Check cache
+                    // Update if different
                     for provider in &self.config.providers {
                         let update = IpUpdate {
                             v4: None,
@@ -189,4 +162,38 @@ impl Client {
         self.tracker.close();
         self.tracker.wait().await;
     }
+}
+
+#[derive(Debug)]
+struct HostResponse {
+    v4: Option<Ipv4Addr>,
+    v6: Option<Ipv6Addr>,
+    port: u16,
+}
+
+async fn resolve_host(host: &str) -> Result<HostResponse, Error> {
+    let mut ipv4 = None;
+    let mut ipv6 = None;
+    let mut port = 0;
+    let addresses = lookup_host(host).await?;
+    for addr in addresses {
+        port = addr.port();
+        match addr.ip() {
+            IpAddr::V4(v4) if ipv4.is_none() => {
+                ipv4 = Some(v4);
+            }
+            IpAddr::V6(v6) if ipv6.is_none() => {
+                ipv6 = Some(v6);
+            }
+            _ => {}
+        }
+        if ipv4.is_some() && ipv6.is_some() {
+            break;
+        }
+    }
+    Ok(HostResponse {
+        v4: ipv4,
+        v6: ipv6,
+        port,
+    })
 }

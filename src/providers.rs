@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use tracing::info;
 
 use crate::client::{IpUpdate, Provider};
 use crate::error::Error;
@@ -16,7 +17,8 @@ struct Cloudflare {
 #[typetag::serde(name = "cloudflare")]
 impl Provider for Cloudflare {
     async fn update(&self, update: IpUpdate) -> Result<bool, Error> {
-        todo!()
+        info!("Updating cloudflare");
+        Ok(true)
     }
 }
 
@@ -31,6 +33,7 @@ struct DynDns {
 #[typetag::serde(name = "dyndns")]
 impl Provider for DynDns {
     async fn update(&self, update: IpUpdate) -> Result<bool, Error> {
-        todo!()
+        info!("Updating dyndns");
+        Ok(true)
     }
 }

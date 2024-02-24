@@ -30,7 +30,7 @@ struct Args {
     config: Option<OsString>,
 }
 
-#[tokio::main]
+#[tokio::main(worker_threads = 2)]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     let args = Args::parse();
