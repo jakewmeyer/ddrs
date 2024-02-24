@@ -16,7 +16,7 @@ struct Cloudflare {
 #[async_trait]
 #[typetag::serde(name = "cloudflare")]
 impl Provider for Cloudflare {
-    async fn update(&self, update: IpUpdate) -> Result<bool, Error> {
+    async fn update(&self, update: &IpUpdate) -> Result<bool, Error> {
         info!("Updating cloudflare");
         Ok(true)
     }
@@ -32,8 +32,9 @@ struct DynDns {
 #[async_trait]
 #[typetag::serde(name = "dyndns")]
 impl Provider for DynDns {
-    async fn update(&self, update: IpUpdate) -> Result<bool, Error> {
+    async fn update(&self, update: &IpUpdate) -> Result<bool, Error> {
         info!("Updating dyndns");
+        dbg!(update);
         Ok(true)
     }
 }

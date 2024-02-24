@@ -30,29 +30,23 @@ pub struct IpSourceInterface {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct IpSourceStatic {
-    address: IpAddr,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum IpSource {
     Stun,
     Http,
     Interface(IpSourceInterface),
-    Static(IpSourceStatic),
 }
 
 #[derive(Debug)]
 pub struct IpUpdate {
-    v4: Option<Ipv4Addr>,
-    v6: Option<Ipv6Addr>,
+    v4: Option<IpAddr>,
+    v6: Option<IpAddr>,
 }
 
 #[async_trait]
 #[typetag::serde(tag = "type")]
 pub trait Provider: Debug + Send + Sync {
-    async fn update(&self, update: IpUpdate) -> Result<bool, Error>;
+    async fn update(&self, update: &IpUpdate) -> Result<bool, Error>;
 }
 
 #[derive(Debug)]
@@ -73,7 +67,7 @@ impl Client {
         }
     }
 
-    async fn fetch_ip_stun(&self, version: IpVersion) -> Result<IpAddr, Error> {
+    async fn fetch_ip_stun(&self, version: &IpVersion) -> Result<IpAddr, Error> {
         let resolved = resolve_host(&self.config.stun_addr).await?;
         let (handler_tx, mut handler_rx) = tokio::sync::mpsc::unbounded_channel();
         let conn = UdpSocket::bind("0:0").await?;
@@ -116,7 +110,7 @@ impl Client {
         }
     }
 
-    async fn fetch_ip_http(&self, version: IpVersion) -> Result<IpAddr, Error> {
+    async fn fetch_ip_http(&self, version: &IpVersion) -> Result<IpAddr, Error> {
         let urls = match version {
             IpVersion::V4 => &self.config.http_ipv4,
             IpVersion::V6 => &self.config.http_ipv6,
@@ -141,15 +135,26 @@ impl Client {
                     break;
                 }
                 _ = interval.tick() => {
-                    let _ip = self.fetch_ip_stun(IpVersion::V4).await?;
-                    // Check cache
-                    // Update if different
+                    let mut update = IpUpdate {
+                        v4: None,
+                        v6: None,
+                    };
+                    for version in &self.config.versions {
+                        if let Some(ip) = match &self.config.source {
+                            IpSource::Stun => self.fetch_ip_stun(version).await.ok(),
+                            IpSource::Http => self.fetch_ip_http(version).await.ok(),
+                            IpSource::Interface(interface) => {
+                                todo!("Check local interface address");
+                            },
+                        } {
+                            match version {
+                                IpVersion::V4 => update.v4 = Some(ip),
+                                IpVersion::V6 => update.v6 = Some(ip),
+                            }
+                        }
+                    }
                     for provider in &self.config.providers {
-                        let update = IpUpdate {
-                            v4: None,
-                            v6: None,
-                        };
-                        provider.update(update).await?;
+                        provider.update(&update).await?;
                     }
                 },
             }
