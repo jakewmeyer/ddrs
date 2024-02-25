@@ -26,6 +26,7 @@ mod providers;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
+    // Config file path
     #[arg(short, long)]
     config: Option<OsString>,
 }

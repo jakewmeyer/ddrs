@@ -5,10 +5,11 @@ use tracing::info;
 use crate::client::{IpUpdate, Provider};
 use crate::error::Error;
 
+/// Cloudflare DNS update provider
 #[derive(Debug, Serialize, Deserialize)]
 struct Cloudflare {
     host: String,
-    api_key: String,
+    api_token: String,
     proxied: bool,
     ttl: u32,
 }
@@ -22,6 +23,7 @@ impl Provider for Cloudflare {
     }
 }
 
+/// Dyndns update provider
 #[derive(Debug, Serialize, Deserialize)]
 struct DynDns {
     host: String,

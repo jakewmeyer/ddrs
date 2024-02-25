@@ -1,5 +1,6 @@
 use thiserror::Error;
 
+/// Crate error type
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("STUN error")]

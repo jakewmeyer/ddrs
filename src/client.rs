@@ -19,6 +19,7 @@ use tracing::error;
 use crate::config::Config;
 use crate::error::Error;
 
+/// IP version without associated address
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IpVersion {
@@ -26,11 +27,13 @@ pub enum IpVersion {
     V6,
 }
 
+/// IP interface source serde representation
 #[derive(Debug, Serialize, Deserialize)]
 pub struct IpSourceInterface {
     name: String,
 }
 
+/// IP source for fetching the address
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum IpSource {
@@ -39,18 +42,21 @@ pub enum IpSource {
     Interface(IpSourceInterface),
 }
 
+/// Update sent to each provider
 #[derive(Debug, PartialEq, Eq)]
 pub struct IpUpdate {
     v4: Option<IpAddr>,
     v6: Option<IpAddr>,
 }
 
+/// Provider trait for updating DNS records or DDNS services
 #[async_trait]
 #[typetag::serde(tag = "type")]
 pub trait Provider: Debug + Send + Sync {
     async fn update(&self, update: &IpUpdate) -> Result<bool, Error>;
 }
 
+/// DDRS client
 #[derive(Debug)]
 pub struct Client {
     config: Config,
@@ -69,6 +75,7 @@ impl Client {
         }
     }
 
+    /// Fetches the IP address via a STUN request to a public server
     async fn fetch_ip_stun(&self, version: &IpVersion) -> Result<IpAddr, Error> {
         let resolved = resolve_host(&self.config.stun_addr).await?;
         let (handler_tx, mut handler_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -116,6 +123,7 @@ impl Client {
         }
     }
 
+    /// Fetches the IP address via a HTTP request
     async fn fetch_ip_http(&self, version: &IpVersion) -> Result<IpAddr, Error> {
         let urls = match version {
             IpVersion::V4 => &self.config.http_ipv4,
@@ -132,6 +140,7 @@ impl Client {
         Err(Error::Unknown)
     }
 
+    /// Starts the client
     pub async fn run(&self) -> Result<(), Error> {
         let mut interval = time::interval(self.config.interval);
         loop {
@@ -171,6 +180,8 @@ impl Client {
         Ok(())
     }
 
+    /// Trigger a graceful shutdown of the client
+    /// This will wait for all in progress updates to finish
     pub async fn shutdown(&self) {
         self.shutdown.cancel();
         self.tracker.close();
@@ -178,6 +189,7 @@ impl Client {
     }
 }
 
+/// Host response from DNS resolution
 #[derive(Debug)]
 struct HostResponse {
     v4: Option<Ipv4Addr>,
@@ -185,6 +197,7 @@ struct HostResponse {
     port: u16,
 }
 
+/// Resolve a host to an IP address using `ToSocketAddrs`
 async fn resolve_host(host: &str) -> Result<HostResponse, Error> {
     let mut ipv4 = None;
     let mut ipv6 = None;
@@ -212,6 +225,7 @@ async fn resolve_host(host: &str) -> Result<HostResponse, Error> {
     })
 }
 
+/// Fetches the IP address of a specific network interface
 fn fetch_ip_interface(interface: &IpSourceInterface, version: &IpVersion) -> Result<IpAddr, Error> {
     let interfaces = list_afinet_netifas()?;
     for iface in interfaces {
