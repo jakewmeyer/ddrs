@@ -14,7 +14,7 @@ type = "stun"
 [[providers]]
 type = "cloudflare"
 host = "example.com"
-api_key = "API_KEY_HERE"
+api_token = "API_KEY_HERE"
 proxied = false
 ttl = 0
 

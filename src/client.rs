@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use local_ip_address::list_afinet_netifas;
+use reqwest::Client as HttpClient;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -53,7 +54,7 @@ pub struct IpUpdate {
 #[async_trait]
 #[typetag::serde(tag = "type")]
 pub trait Provider: Debug + Send + Sync {
-    async fn update(&self, update: &IpUpdate) -> Result<bool, Error>;
+    async fn update(&self, update: &IpUpdate, request: &HttpClient) -> Result<bool, Error>;
 }
 
 /// DDRS client
@@ -61,6 +62,7 @@ pub trait Provider: Debug + Send + Sync {
 pub struct Client {
     config: Config,
     cache: RwLock<IpUpdate>,
+    request: HttpClient,
     shutdown: CancellationToken,
     pub tracker: TaskTracker,
 }
@@ -70,6 +72,7 @@ impl Client {
         Client {
             config,
             cache: RwLock::new(IpUpdate { v4: None, v6: None }),
+            request: HttpClient::new(),
             shutdown: CancellationToken::new(),
             tracker: TaskTracker::new(),
         }
@@ -170,7 +173,7 @@ impl Client {
                         continue;
                     }
                     for provider in &self.config.providers {
-                        provider.update(&update).await?;
+                        provider.update(&update, &self.request).await?;
                     }
                     let mut cache = self.cache.write().await;
                     *cache = update;

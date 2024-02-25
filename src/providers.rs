@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
@@ -17,7 +18,7 @@ struct Cloudflare {
 #[async_trait]
 #[typetag::serde(name = "cloudflare")]
 impl Provider for Cloudflare {
-    async fn update(&self, update: &IpUpdate) -> Result<bool, Error> {
+    async fn update(&self, update: &IpUpdate, request: &Client) -> Result<bool, Error> {
         info!("Updating cloudflare");
         Ok(true)
     }
@@ -34,7 +35,7 @@ struct DynDns {
 #[async_trait]
 #[typetag::serde(name = "dyndns")]
 impl Provider for DynDns {
-    async fn update(&self, update: &IpUpdate) -> Result<bool, Error> {
+    async fn update(&self, update: &IpUpdate, request: &Client) -> Result<bool, Error> {
         info!("Updating dyndns");
         Ok(true)
     }
