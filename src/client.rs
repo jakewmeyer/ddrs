@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
+use tokio::sync::RwLock;
 use tokio::time;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
@@ -38,7 +39,7 @@ pub enum IpSource {
     Interface(IpSourceInterface),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct IpUpdate {
     v4: Option<IpAddr>,
     v6: Option<IpAddr>,
@@ -53,7 +54,7 @@ pub trait Provider: Debug + Send + Sync {
 #[derive(Debug)]
 pub struct Client {
     config: Config,
-    cache: IpUpdate,
+    cache: RwLock<IpUpdate>,
     shutdown: CancellationToken,
     pub tracker: TaskTracker,
 }
@@ -62,7 +63,7 @@ impl Client {
     pub fn new(config: Config) -> Client {
         Client {
             config,
-            cache: IpUpdate { v4: None, v6: None },
+            cache: RwLock::new(IpUpdate { v4: None, v6: None }),
             shutdown: CancellationToken::new(),
             tracker: TaskTracker::new(),
         }
@@ -156,9 +157,14 @@ impl Client {
                             }
                         }
                     }
+                    if update == *self.cache.read().await {
+                        continue;
+                    }
                     for provider in &self.config.providers {
                         provider.update(&update).await?;
                     }
+                    let mut cache = self.cache.write().await;
+                    *cache = update;
                 },
             }
         }
