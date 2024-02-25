@@ -11,6 +11,9 @@ pub enum Error {
     #[error("Request error")]
     Request(#[from] reqwest::Error),
 
+    #[error("Local IP address error")]
+    LocalIpAddress(#[from] local_ip_address::Error),
+
     #[error("Unknown error")]
     Unknown,
 }

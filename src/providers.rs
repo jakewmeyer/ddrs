@@ -34,7 +34,6 @@ struct DynDns {
 impl Provider for DynDns {
     async fn update(&self, update: &IpUpdate) -> Result<bool, Error> {
         info!("Updating dyndns");
-        dbg!(update);
         Ok(true)
     }
 }

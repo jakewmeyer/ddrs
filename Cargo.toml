@@ -17,6 +17,7 @@ clap = { version = "4.5.1", features = ["derive"] }
 dirs = "5.0.1"
 figment = { version = "0.10.14", features = ["toml"] }
 humantime-serde = "1.1.1"
+local-ip-address = "0.6.0"
 miette = { version = "7.1.0", features = ["fancy"] }
 reqwest = "0.11.24"
 serde = { version = "1.0.197", features = ["serde_derive"] }

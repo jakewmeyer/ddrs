@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use local_ip_address::list_afinet_netifas;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -26,7 +27,7 @@ pub enum IpVersion {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct IpSourceInterface {
-    interface: String,
+    name: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -76,7 +77,9 @@ impl Client {
                 if let Some(v4) = resolved.v4 {
                     SocketAddr::new(IpAddr::V4(v4), resolved.port)
                 } else {
-                    error!("Failed to create ipv4 socket address for STUN server");
+                    error!(
+                        "Failed to create ipv4 socket address for STUN server, is ipv4 enabled?"
+                    );
                     return Err(Error::Unknown);
                 }
             }
@@ -84,7 +87,9 @@ impl Client {
                 if let Some(v6) = resolved.v6 {
                     SocketAddr::new(IpAddr::V6(v6), resolved.port)
                 } else {
-                    error!("Failed to create ipv6 socket address for STUN server");
+                    error!(
+                        "Failed to create ipv6 socket address for STUN server, is ipv6 enabled?"
+                    );
                     return Err(Error::Unknown);
                 }
             }
@@ -143,9 +148,7 @@ impl Client {
                         if let Some(ip) = match &self.config.source {
                             IpSource::Stun => self.fetch_ip_stun(version).await.ok(),
                             IpSource::Http => self.fetch_ip_http(version).await.ok(),
-                            IpSource::Interface(interface) => {
-                                todo!("Check local interface address");
-                            },
+                            IpSource::Interface(interface) => fetch_ip_interface(interface, version).ok(),
                         } {
                             match version {
                                 IpVersion::V4 => update.v4 = Some(ip),
@@ -201,4 +204,25 @@ async fn resolve_host(host: &str) -> Result<HostResponse, Error> {
         v6: ipv6,
         port,
     })
+}
+
+fn fetch_ip_interface(interface: &IpSourceInterface, version: &IpVersion) -> Result<IpAddr, Error> {
+    let interfaces = list_afinet_netifas()?;
+    for iface in interfaces {
+        if iface.0 == interface.name {
+            match version {
+                IpVersion::V4 => {
+                    if iface.1.is_ipv4() {
+                        return Ok(iface.1);
+                    }
+                }
+                IpVersion::V6 => {
+                    if iface.1.is_ipv6() {
+                        return Ok(iface.1);
+                    }
+                }
+            }
+        }
+    }
+    Err(Error::Unknown)
 }
