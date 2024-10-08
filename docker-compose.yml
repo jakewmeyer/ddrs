@@ -1,0 +1,8 @@
+services:
+  cloudflare-ddrs:
+    image: ddrs:latest
+    container_name: ddrs
+    network_mode: "host"
+    restart: always
+    volumes:
+      - ./config.toml:/etc/ddrs/config.toml
