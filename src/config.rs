@@ -15,6 +15,8 @@ pub struct Config {
     pub source: IpSource,
     /// IP versions to check/update
     pub versions: SmallVec<[IpVersion; 2]>,
+    /// Toggle dry run mode
+    pub dry_run: bool,
     /// STUN server address with port
     pub stun_addr: String,
     /// HTTP servers for IPv4 address checks
@@ -31,6 +33,7 @@ impl Default for Config {
             interval: Duration::from_secs(10),
             source: IpSource::Stun,
             versions: smallvec![IpVersion::V4],
+            dry_run: false,
             stun_addr: String::from("stun.l.google.com:19302"),
             http_ipv4: smallvec![
                 String::from("https://api.ipify.org"),
