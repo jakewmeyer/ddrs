@@ -1,6 +1,3 @@
-versions = ["v4", "v6"]
-interval = "10s"
-
 [source]
 type = "stun"
 
@@ -11,15 +8,24 @@ type = "stun"
 # type = "interface"
 # name = "eth0"
 
+versions = ["v4"]
+
+# versions = ["v4", "v6"]
+
+# Cloudflare Provider
 [[providers]]
 type = "cloudflare"
-host = "example.com"
-api_token = "API_KEY_HERE"
-proxied = false
-ttl = 0
+zone = "domain.com"
+api_token = "TOKEN"
 
-[[providers]]
-type = "dyndns"
-host = "example.com"
-username = "user"
-password = "pass"
+[[providers.domains]]
+name = "*.domain.com" # Required
+ttl = 1
+proxied = false
+comment = "Wildcard subdomain"
+
+[[providers.domains]]
+name = "domain.com" # Required
+ttl = 1
+proxied = false
+comment = "Root domain"

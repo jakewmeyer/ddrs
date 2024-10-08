@@ -1,24 +1,25 @@
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use local_ip_address::list_afinet_netifas;
 use reqwest::Client as HttpClient;
 use serde::{Deserialize, Serialize};
-use std::fmt::Debug;
+use core::fmt;
+use std::fmt::{Debug, Display, Formatter};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tokio::task::JoinHandle;
 use tokio::time;
 use tokio_util::sync::CancellationToken;
-use tokio_util::task::TaskTracker;
+use tracing::{debug, error, info};
 
 use stun::agent::TransactionId;
 use stun::client::ClientBuilder;
 use stun::message::{Getter, Message, BINDING_REQUEST};
 use stun::xoraddr::XorMappedAddress;
 use tokio::net::{lookup_host, UdpSocket};
-use tracing::error;
 
 use crate::config::Config;
-use crate::error::Error;
 
 /// IP version without associated address
 #[derive(Debug, Serialize, Deserialize)]
@@ -50,11 +51,23 @@ pub struct IpUpdate {
     v6: Option<IpAddr>,
 }
 
+impl Display for IpUpdate {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "v4: {:?}, v6: {:?}", self.v4, self.v6)
+    }
+}
+
+impl IpUpdate {
+    pub fn as_array(&self) -> [(IpVersion, Option<IpAddr>); 2] {
+        [(IpVersion::V4, self.v4), (IpVersion::V6, self.v6)]
+    }
+}
+
 /// Provider trait for updating DNS records or DDNS services
 #[async_trait]
 #[typetag::serde(tag = "type")]
 pub trait Provider: Debug + Send + Sync {
-    async fn update(&self, update: &IpUpdate, request: &HttpClient) -> Result<bool, Error>;
+    async fn update(&self, update: &IpUpdate, request: &HttpClient) -> Result<bool>;
 }
 
 /// DDRS client
@@ -64,22 +77,20 @@ pub struct Client {
     cache: RwLock<IpUpdate>,
     request: HttpClient,
     shutdown: CancellationToken,
-    pub tracker: TaskTracker,
 }
 
 impl Client {
-    pub fn new(config: Config) -> Client {
-        Client {
+    pub fn new(config: Config) -> Arc<Client> {
+        Arc::new(Client {
             config,
             cache: RwLock::new(IpUpdate { v4: None, v6: None }),
             request: HttpClient::new(),
             shutdown: CancellationToken::new(),
-            tracker: TaskTracker::new(),
-        }
+        })
     }
 
     /// Fetches the IP address via a STUN request to a public server
-    async fn fetch_ip_stun(&self, version: &IpVersion) -> Result<IpAddr, Error> {
+    async fn fetch_ip_stun(&self, version: &IpVersion) -> Result<IpAddr> {
         let resolved = resolve_host(&self.config.stun_addr).await?;
         let (handler_tx, mut handler_rx) = tokio::sync::mpsc::unbounded_channel();
         let conn = UdpSocket::bind("0:0").await?;
@@ -91,7 +102,9 @@ impl Client {
                     error!(
                         "Failed to create ipv4 socket address for STUN server, is ipv4 enabled?"
                     );
-                    return Err(Error::Unknown);
+                    return Err(anyhow!(
+                        "Failed to create ipv4 socket address for STUN server, is ipv4 enabled?"
+                    ));
                 }
             }
             IpVersion::V6 => {
@@ -101,13 +114,14 @@ impl Client {
                     error!(
                         "Failed to create ipv6 socket address for STUN server, is ipv6 enabled?"
                     );
-                    return Err(Error::Unknown);
+                    return Err(anyhow!(
+                        "Failed to create ipv6 socket address for STUN server, is ipv6 enabled?"
+                    ));
                 }
             }
         };
         if let Err(e) = conn.connect(stun_ip).await {
-            error!("Failed to connect to STUN server: {}", e);
-            return Err(Error::Io(e));
+            return Err(anyhow!(e).context("Failed to connect to STUN server"));
         }
         let mut client = ClientBuilder::new().with_conn(Arc::new(conn)).build()?;
         let mut msg = Message::new();
@@ -122,12 +136,13 @@ impl Client {
             Ok(xor_addr.ip)
         } else {
             client.close().await?;
-            Err(Error::Unknown)
+            error!("Failed to receive STUN response");
+            Err(anyhow!("Failed to receive STUN response"))
         }
     }
 
     /// Fetches the IP address via a HTTP request
-    async fn fetch_ip_http(&self, version: &IpVersion) -> Result<IpAddr, Error> {
+    async fn fetch_ip_http(&self, version: &IpVersion) -> Result<IpAddr> {
         let urls = match version {
             IpVersion::V4 => &self.config.http_ipv4,
             IpVersion::V6 => &self.config.http_ipv6,
@@ -140,55 +155,64 @@ impl Client {
                 }
             }
         }
-        Err(Error::Unknown)
+        error!("Failed to fetch IP address from HTTP");
+        Err(anyhow!("Failed to fetch IP address from HTTP"))
     }
 
     /// Starts the client
-    pub async fn run(&self) -> Result<(), Error> {
-        let mut interval = time::interval(self.config.interval);
-        loop {
-            tokio::select! {
-                biased;
-                () = self.shutdown.cancelled() => {
-                    break;
-                }
-                _ = interval.tick() => {
-                    let mut update = IpUpdate {
-                        v4: None,
-                        v6: None,
-                    };
-                    for version in &self.config.versions {
-                        if let Some(ip) = match &self.config.source {
-                            IpSource::Stun => self.fetch_ip_stun(version).await.ok(),
-                            IpSource::Http => self.fetch_ip_http(version).await.ok(),
-                            IpSource::Interface(interface) => fetch_ip_interface(interface, version).ok(),
-                        } {
-                            match version {
-                                IpVersion::V4 => update.v4 = Some(ip),
-                                IpVersion::V6 => update.v6 = Some(ip),
+    pub fn run(self: Arc<Self>) -> JoinHandle<Result<()>> {
+        tokio::spawn(async move {
+            let mut interval = time::interval(self.config.interval);
+            info!(
+                "Started DDRS client, checking IP address every {:?}",
+                self.config.interval
+            );
+            loop {
+                tokio::select! {
+                    biased;
+                    () = self.shutdown.cancelled() => {
+                        break;
+                    }
+                    _ = interval.tick() => {
+                        debug!("Checking IP address...");
+                        let mut update = IpUpdate {
+                            v4: None,
+                            v6: None,
+                        };
+                        for version in &self.config.versions {
+                            if let Some(ip) = match &self.config.source {
+                                IpSource::Stun => self.fetch_ip_stun(version).await.ok(),
+                                IpSource::Http => self.fetch_ip_http(version).await.ok(),
+                                IpSource::Interface(interface) => fetch_ip_interface(interface, version).ok(),
+                            } {
+                                match version {
+                                    IpVersion::V4 => update.v4 = Some(ip),
+                                    IpVersion::V6 => update.v6 = Some(ip),
+                                }
                             }
                         }
+                        debug!("Found IP(s): {update}");
+                        if update == *self.cache.read().await {
+                            debug!("No IP address change detected, skipping update...");
+                            continue;
+                        }
+                        debug!("IP address update detected, updating providers...");
+                        for provider in &self.config.providers {
+                            provider.update(&update, &self.request).await?;
+                        }
+                        debug!("Saving IP address update to cache...");
+                        let mut cache = self.cache.write().await;
+                        *cache = update;
                     }
-                    if update == *self.cache.read().await {
-                        continue;
-                    }
-                    for provider in &self.config.providers {
-                        provider.update(&update, &self.request).await?;
-                    }
-                    let mut cache = self.cache.write().await;
-                    *cache = update;
-                },
+                }
             }
-        }
-        Ok(())
+            Ok(())
+        })
     }
 
     /// Trigger a graceful shutdown of the client
-    /// This will wait for all in progress updates to finish
-    pub async fn shutdown(&self) {
+    pub fn shutdown(&self) {
         self.shutdown.cancel();
-        self.tracker.close();
-        self.tracker.wait().await;
     }
 }
 
@@ -201,7 +225,7 @@ struct HostResponse {
 }
 
 /// Resolve a host to an IP address using `ToSocketAddrs`
-async fn resolve_host(host: &str) -> Result<HostResponse, Error> {
+async fn resolve_host(host: &str) -> Result<HostResponse> {
     let mut ipv4 = None;
     let mut ipv6 = None;
     let mut port = 0;
@@ -229,7 +253,7 @@ async fn resolve_host(host: &str) -> Result<HostResponse, Error> {
 }
 
 /// Fetches the IP address of a specific network interface
-fn fetch_ip_interface(interface: &IpSourceInterface, version: &IpVersion) -> Result<IpAddr, Error> {
+fn fetch_ip_interface(interface: &IpSourceInterface, version: &IpVersion) -> Result<IpAddr> {
     let interfaces = list_afinet_netifas()?;
     for iface in interfaces {
         if iface.0 == interface.name {
@@ -247,5 +271,9 @@ fn fetch_ip_interface(interface: &IpSourceInterface, version: &IpVersion) -> Res
             }
         }
     }
-    Err(Error::Unknown)
+    error!("Failed to find network interface: {}", interface.name);
+    Err(anyhow!(
+        "Failed to find network interface: {}",
+        interface.name
+    ))
 }

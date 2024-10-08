@@ -11,10 +11,10 @@ pub struct Config {
     /// Interval between IP address checks
     #[serde(with = "humantime_serde")]
     pub interval: Duration,
-    /// IP address versions to use in updates
-    pub versions: SmallVec<[IpVersion; 2]>,
-    /// Source of the IP address
+    /// Source for address checks
     pub source: IpSource,
+    /// IP versions to check/update
+    pub versions: SmallVec<[IpVersion; 2]>,
     /// STUN server address with port
     pub stun_addr: String,
     /// HTTP servers for IPv4 address checks
@@ -22,15 +22,15 @@ pub struct Config {
     /// HTTP servers for IPv6 address checks
     pub http_ipv6: SmallVec<[String; 3]>,
     /// DNS update providers
-    pub providers: SmallVec<[Box<dyn Provider>; 3]>,
+    pub providers: SmallVec<[Box<dyn Provider>; 1]>,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
             interval: Duration::from_secs(10),
-            versions: smallvec![IpVersion::V4, IpVersion::V6],
             source: IpSource::Stun,
+            versions: smallvec![IpVersion::V4],
             stun_addr: String::from("stun.l.google.com:19302"),
             http_ipv4: smallvec![
                 String::from("https://api.ipify.org"),

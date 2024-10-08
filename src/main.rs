@@ -2,25 +2,24 @@
 #![deny(clippy::pedantic)]
 #![forbid(unsafe_code)]
 
-use std::{ffi::OsString, path::Path, sync::Arc};
+use std::{ffi::OsString, path::Path};
 
+use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use client::Client;
 use figment::{
     providers::{Format, Serialized, Toml},
     Figment,
 };
-use miette::{miette, IntoDiagnostic, Result};
 use tokio::signal;
 use tracing::info;
 
 use crate::config::Config;
 
-const CONFIG_PATH: &str = "ddrs/config.toml";
+const CONFIG_PATH: &str = "/etc/ddrs/config.toml";
 
 mod client;
 mod config;
-mod error;
 mod providers;
 
 #[derive(Parser, Debug)]
@@ -38,24 +37,20 @@ async fn main() -> Result<()> {
     let config_path = match args.config {
         Some(path) => Path::new(&path)
             .canonicalize()
-            .into_diagnostic()?
-            .to_str()
-            .ok_or_else(|| miette!("Invalid config path"))?
-            .to_string(),
-        None => dirs::config_dir()
-            .ok_or_else(|| miette!("No config directory found"))?
-            .join(CONFIG_PATH)
-            .to_str()
-            .ok_or_else(|| miette!("Invalid config path"))?
-            .to_string(),
+            .context("Failed to canonicalize config arg path")?,
+        None => Path::new(CONFIG_PATH).to_path_buf(),
     };
 
     let config: Config = Figment::from(Serialized::defaults(Config::default()))
         .merge(Toml::file(config_path))
         .extract()
-        .into_diagnostic()?;
+        .context("Figment failed to parse")?;
 
-    let client = Arc::new(Client::new(config));
+    if config.providers.is_empty() {
+        return Err(anyhow!("No providers configured"));
+    }
+
+    let client = Client::new(config);
 
     // Handle SIGINT
     let ctrl_c = async {
@@ -72,20 +67,20 @@ async fn main() -> Result<()> {
             .await;
     };
 
-    let spawn_client = client.clone();
-    let run_client = client.clone();
-    spawn_client
-        .tracker
-        .spawn(async move { run_client.run().await.into_diagnostic() });
+    let graceful = client.clone();
+    let client_handle = client.run();
 
     tokio::select! {
         () = ctrl_c => {},
         () = terminate => {},
     }
 
-    client.shutdown().await;
+    info!("Starting graceful shutdown...");
 
-    info!("Shutting down client...");
+    graceful.shutdown();
+    client_handle.await??;
+
+    info!("Graceful shutdown complete");
 
     Ok(())
 }
