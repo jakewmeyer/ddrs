@@ -136,7 +136,13 @@ impl Client {
         client.send(&msg, Some(handler.clone())).await?;
         if let Some(event) = handler_rx.recv().await {
             let msg = event.event_body?;
-            let mut xor_addr = XorMappedAddress::default();
+            let mut xor_addr = XorMappedAddress {
+                ip: match version {
+                    IpVersion::V4 => IpAddr::V4(Ipv4Addr::from(0)),
+                    IpVersion::V6 => IpAddr::V6(Ipv6Addr::from(0)),
+                },
+                port: 0,
+            };
             xor_addr.get_from(&msg)?;
             client.close().await?;
             Ok(xor_addr.ip)
