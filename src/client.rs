@@ -99,7 +99,11 @@ impl Client {
     async fn fetch_ip_stun(&self, version: &IpVersion) -> Result<IpAddr> {
         let resolved = resolve_host(&self.resolver, &self.config.stun_url).await?;
         let (handler_tx, mut handler_rx) = tokio::sync::mpsc::unbounded_channel();
-        let conn = UdpSocket::bind("0:0").await?;
+        let bind_address = match version {
+            IpVersion::V4 => "0:0",
+            IpVersion::V6 => "[::]:0",
+        };
+        let conn = UdpSocket::bind(bind_address).await?;
         let stun_ip = match version {
             IpVersion::V4 => {
                 if let Some(v4) = resolved.v4 {
