@@ -16,6 +16,7 @@ anyhow = "1.0.89"
 async-trait = "0.1.83"
 clap = { version = "4.5.20", features = ["derive"] }
 figment = { version = "0.10.19", features = ["toml"] }
+hickory-resolver = "0.24.1"
 humantime-serde = "1.1.1"
 local-ip-address = "0.6.3"
 miette = { version = "7.2.0", features = ["fancy"] }

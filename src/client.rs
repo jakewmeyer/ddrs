@@ -1,9 +1,11 @@
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use core::fmt;
+use hickory_resolver::config::{LookupIpStrategy, ResolverConfig, ResolverOpts};
+use hickory_resolver::TokioAsyncResolver;
 use local_ip_address::list_afinet_netifas;
 use reqwest::Client as HttpClient;
 use serde::{Deserialize, Serialize};
-use core::fmt;
 use std::fmt::{Debug, Display, Formatter};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
@@ -17,7 +19,7 @@ use stun::agent::TransactionId;
 use stun::client::ClientBuilder;
 use stun::message::{Getter, Message, BINDING_REQUEST};
 use stun::xoraddr::XorMappedAddress;
-use tokio::net::{lookup_host, UdpSocket};
+use tokio::net::UdpSocket;
 
 use crate::config::Config;
 
@@ -77,27 +79,31 @@ pub struct Client {
     cache: RwLock<IpUpdate>,
     request: HttpClient,
     shutdown: CancellationToken,
+    resolver: TokioAsyncResolver,
 }
 
 impl Client {
     pub fn new(config: Config) -> Arc<Client> {
+        let mut resolver_opts = ResolverOpts::default();
+        resolver_opts.ip_strategy = LookupIpStrategy::Ipv4AndIpv6;
         Arc::new(Client {
             config,
             cache: RwLock::new(IpUpdate { v4: None, v6: None }),
             request: HttpClient::new(),
             shutdown: CancellationToken::new(),
+            resolver: TokioAsyncResolver::tokio(ResolverConfig::default(), resolver_opts),
         })
     }
 
     /// Fetches the IP address via a STUN request to a public server
     async fn fetch_ip_stun(&self, version: &IpVersion) -> Result<IpAddr> {
-        let resolved = resolve_host(&self.config.stun_addr).await?;
+        let resolved = resolve_host(&self.resolver, &self.config.stun_url).await?;
         let (handler_tx, mut handler_rx) = tokio::sync::mpsc::unbounded_channel();
         let conn = UdpSocket::bind("0:0").await?;
         let stun_ip = match version {
             IpVersion::V4 => {
                 if let Some(v4) = resolved.v4 {
-                    SocketAddr::new(IpAddr::V4(v4), resolved.port)
+                    SocketAddr::new(IpAddr::V4(v4), self.config.stun_port)
                 } else {
                     error!(
                         "Failed to create ipv4 socket address for STUN server, is ipv4 enabled?"
@@ -109,7 +115,7 @@ impl Client {
             }
             IpVersion::V6 => {
                 if let Some(v6) = resolved.v6 {
-                    SocketAddr::new(IpAddr::V6(v6), resolved.port)
+                    SocketAddr::new(IpAddr::V6(v6), self.config.stun_port)
                 } else {
                     error!(
                         "Failed to create ipv6 socket address for STUN server, is ipv6 enabled?"
@@ -226,18 +232,15 @@ impl Client {
 struct HostResponse {
     v4: Option<Ipv4Addr>,
     v6: Option<Ipv6Addr>,
-    port: u16,
 }
 
 /// Resolve a host to an IP address using `ToSocketAddrs`
-async fn resolve_host(host: &str) -> Result<HostResponse> {
+async fn resolve_host(resolver: &TokioAsyncResolver, host: &str) -> Result<HostResponse> {
     let mut ipv4 = None;
     let mut ipv6 = None;
-    let mut port = 0;
-    let addresses = lookup_host(host).await?;
-    for addr in addresses {
-        port = addr.port();
-        match addr.ip() {
+    let response = resolver.lookup_ip(host).await?;
+    for addr in response.iter() {
+        match addr {
             IpAddr::V4(v4) if ipv4.is_none() => {
                 ipv4 = Some(v4);
             }
@@ -250,11 +253,7 @@ async fn resolve_host(host: &str) -> Result<HostResponse> {
             break;
         }
     }
-    Ok(HostResponse {
-        v4: ipv4,
-        v6: ipv6,
-        port,
-    })
+    Ok(HostResponse { v4: ipv4, v6: ipv6 })
 }
 
 /// Fetches the IP address of a specific network interface
