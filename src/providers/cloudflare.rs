@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use smallvec::SmallVec;
 use tracing::{debug, error};
 
 use crate::client::{IpUpdate, IpVersion, Provider};
@@ -14,7 +15,7 @@ const CLOUDFLARE_API: &str = "https://api.cloudflare.com/client/v4";
 pub struct Cloudflare {
     zone: String,
     api_token: String,
-    domains: Vec<Domains>,
+    domains: SmallVec<[Domains; 2]>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
