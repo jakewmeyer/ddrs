@@ -244,7 +244,7 @@ struct HostResponse {
     v6: Option<Ipv6Addr>,
 }
 
-/// Resolve a host to an IP address using `ToSocketAddrs`
+/// Resolve a host to an IP address
 async fn resolve_host(resolver: &TokioAsyncResolver, host: &str) -> Result<HostResponse> {
     let mut ipv4 = None;
     let mut ipv6 = None;

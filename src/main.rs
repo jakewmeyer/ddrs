@@ -2,15 +2,15 @@
 #![deny(clippy::pedantic)]
 #![forbid(unsafe_code)]
 
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
 use std::{ffi::OsString, path::Path};
 
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use client::Client;
-use figment::{
-    providers::{Format, Serialized, Toml},
-    Figment,
-};
 use tokio::signal;
 use tracing::info;
 
@@ -32,6 +32,9 @@ struct Args {
 
 #[tokio::main(worker_threads = 1)]
 async fn main() -> Result<()> {
+    #[cfg(feature = "dhat-heap")]
+    let _profiler = dhat::Profiler::new_heap();
+
     tracing_subscriber::fmt::init();
     let args = Args::parse();
     let config_path = match args.config {
@@ -41,10 +44,7 @@ async fn main() -> Result<()> {
         None => Path::new(CONFIG_PATH).to_path_buf(),
     };
 
-    let config: Config = Figment::from(Serialized::defaults(Config::default()))
-        .merge(Toml::file(config_path))
-        .extract()
-        .context("Figment failed to parse")?;
+    let config = toml::from_str::<Config>(&std::fs::read_to_string(config_path)?)?;
 
     if config.providers.is_empty() {
         return Err(anyhow!("No providers configured"));

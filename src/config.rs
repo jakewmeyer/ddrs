@@ -7,6 +7,7 @@ use crate::client::{IpSource, IpVersion, Provider};
 
 /// Client configuration
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(default)]
 pub struct Config {
     /// Interval between IP address checks
     #[serde(with = "humantime_serde")]

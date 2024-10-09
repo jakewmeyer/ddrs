@@ -15,7 +15,7 @@ readme = "README.md"
 anyhow = "1.0.89"
 async-trait = "0.1.83"
 clap = { version = "4.5.20", features = ["derive"] }
-figment = { version = "0.10.19", features = ["toml"] }
+dhat = "0.3.3"
 hickory-resolver = "0.24.1"
 humantime-serde = "1.1.1"
 local-ip-address = "0.6.3"
@@ -23,7 +23,6 @@ reqwest = { version = "0.12.8", features = [
   "http2",
   "charset",
   "json",
-  "gzip",
   "zstd",
   "brotli",
   "rustls-tls",
@@ -41,11 +40,17 @@ tokio = { version = "1.40.0", features = [
   "parking_lot",
 ] }
 tokio-util = { version = "0.7.12", features = ["rt"] }
+toml = "0.8.19"
 tracing = { version = "0.1.40", features = ["log"] }
 tracing-subscriber = "0.3.18"
 typetag = "0.2.18"
 
+
+[features]
+dhat-heap = [] 
+
 [profile.release]
-strip = true
-lto = true
+debug = 1
+# strip = true
+# lto = true
 codegen-units = 1
