@@ -216,10 +216,11 @@ impl Client {
                             info!("Dry run mode enabled, skipping update...");
                             continue;
                         }
-                        debug!("IP address update detected, updating providers...");
+                        info!("IP address update detected, updating providers...");
                         for provider in &self.config.providers {
                             provider.update(&update, &self.request).await?;
                         }
+                        info!("Providers updated successfully wih IP(s): {update}");
                         // TODO: Only write on successful update
                         debug!("Saving IP address update to cache...");
                         let mut cache = self.cache.write().await;
