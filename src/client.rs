@@ -55,7 +55,12 @@ pub struct IpUpdate {
 
 impl Display for IpUpdate {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "v4: {:?}, v6: {:?}", self.v4, self.v6)
+        write!(
+            f,
+            "v4: {}, v6: {}",
+            self.v4.map_or("None".to_string(), |ip| ip.to_string()),
+            self.v6.map_or("None".to_string(), |ip| ip.to_string())
+        )
     }
 }
 
