@@ -15,7 +15,6 @@ readme = "README.md"
 anyhow = "1.0.89"
 async-trait = "0.1.83"
 clap = { version = "4.5.20", features = ["derive"] }
-dhat = "0.3.3"
 hickory-resolver = "0.24.1"
 humantime-serde = "1.1.1"
 local-ip-address = "0.6.3"
@@ -45,12 +44,7 @@ tracing = { version = "0.1.40", features = ["log"] }
 tracing-subscriber = "0.3.18"
 typetag = "0.2.18"
 
-
-[features]
-dhat-heap = [] 
-
 [profile.release]
-debug = 1
-# strip = true
-# lto = true
+strip = true
+lto = true
 codegen-units = 1

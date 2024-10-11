@@ -2,10 +2,6 @@
 #![deny(clippy::pedantic)]
 #![forbid(unsafe_code)]
 
-#[cfg(feature = "dhat-heap")]
-#[global_allocator]
-static ALLOC: dhat::Alloc = dhat::Alloc;
-
 use std::{ffi::OsString, path::Path};
 
 use anyhow::{anyhow, Context, Result};
@@ -32,9 +28,6 @@ struct Args {
 
 #[tokio::main(worker_threads = 1)]
 async fn main() -> Result<()> {
-    #[cfg(feature = "dhat-heap")]
-    let _profiler = dhat::Profiler::new_heap();
-
     tracing_subscriber::fmt::init();
     let args = Args::parse();
     let config_path = match args.config {
