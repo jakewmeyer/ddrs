@@ -60,7 +60,7 @@ comment = "Root domain"
 ```
 
 ## Deployment
-* Logging can be configured with the `RUST_LOG` environment variable. By default, the log level is set to `info`. For more verbose logging, set the environment variable to `ddrs=debug`.
+* Logging can be configured with the [RUST_LOG](https://docs.rs/env_logger/latest/env_logger/#enabling-logging) environment variable. By default, the log level is set to `info`. For more verbose logging, set the environment variable to `ddrs=debug`.
 
 ### Docker Compose
 * Create configuration file `config.toml`
