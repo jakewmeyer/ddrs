@@ -222,14 +222,18 @@ impl Client {
                             continue;
                         }
                         info!("IP address update detected, updating providers...");
+                        let mut failed = false;
                         for provider in &self.config.providers {
-                            provider.update(&update, &self.request).await?;
+                            if let Err(error) = provider.update(&update, &self.request).await {
+                                error!("Failed to update provider: {error}");
+                                failed = true;
+                            }
                         }
-                        info!("Providers updated successfully wih IP(s): {update}");
-                        // TODO: Only write on successful update
-                        debug!("Saving IP address update to cache...");
-                        let mut cache = self.cache.write().await;
-                        *cache = update;
+                        if !failed {
+                            info!("Providers updated successfully wih IP(s): {update}");
+                            let mut cache = self.cache.write().await;
+                            *cache = update;
+                        }
                     }
                 }
             }

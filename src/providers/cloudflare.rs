@@ -123,7 +123,8 @@ impl Provider for Cloudflare {
                         if updated.success {
                             debug!("Record updated: {:#?}", updated);
                         } else {
-                            error!("Failed to update record: {:#?}", updated);
+                            error!("Failed to update domain ({}) record: {:#?}", domain.name, updated);
+                            return Err(anyhow!("Failed to update domain ({}) record", domain.name));
                         }
                     } else {
                         debug!(
@@ -148,7 +149,8 @@ impl Provider for Cloudflare {
                         if created.success {
                             debug!("Record created: {:#?}", created);
                         } else {
-                            error!("Failed to create record: {:#?}", created);
+                            error!("Failed to create domain ({}) record: {:#?}", domain.name, created);
+                            return Err(anyhow!("Failed to create domain ({}) record", domain.name));
                         }
                     };
                 }
