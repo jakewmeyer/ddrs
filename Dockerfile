@@ -1,4 +1,4 @@
-FROM rust:1.81.0-alpine AS base
+FROM rust:1.82.0-alpine AS base
 RUN apk add musl-dev musl-utils
 RUN cargo install cargo-chef
 
@@ -8,7 +8,7 @@ RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
 COPY --from=chef /recipe.json recipe.json
-RUN cargo chef cook --release --recipe-path recipe.json
+RUN cargo chef cook --target x86_64-unknown-linux-musl --release  --bin ddrs --recipe-path recipe.json
 COPY . .
 RUN cargo build --target x86_64-unknown-linux-musl --release --bin ddrs
 
