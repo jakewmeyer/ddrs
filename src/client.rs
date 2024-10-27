@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use core::fmt;
+use dyn_clone::DynClone;
 use hickory_resolver::config::{LookupIpStrategy, ResolverConfig, ResolverOpts};
 use hickory_resolver::TokioAsyncResolver;
 use local_ip_address::list_afinet_netifas;
@@ -10,7 +11,7 @@ use std::fmt::{Debug, Display, Formatter};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tokio::task::JoinHandle;
+use tokio::task::{JoinHandle, JoinSet};
 use tokio::time;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info};
@@ -47,7 +48,7 @@ pub enum IpSource {
 }
 
 /// Update sent to each provider
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IpUpdate {
     v4: Option<IpAddr>,
     v6: Option<IpAddr>,
@@ -73,9 +74,11 @@ impl IpUpdate {
 /// Provider trait for updating DNS records or DDNS services
 #[async_trait]
 #[typetag::serde(tag = "type")]
-pub trait Provider: Debug + Send + Sync {
-    async fn update(&self, update: &IpUpdate, request: &HttpClient) -> Result<bool>;
+pub trait Provider: Debug + DynClone + Send + Sync {
+    async fn update(&self, update: IpUpdate, request: HttpClient) -> Result<bool>;
 }
+
+dyn_clone::clone_trait_object!(Provider);
 
 /// DDRS client
 #[derive(Debug)]
@@ -222,11 +225,28 @@ impl Client {
                             continue;
                         }
                         info!("IP address update detected, updating providers...");
-                        let mut failed = false;
+
+                        let mut set = JoinSet::new();
                         for provider in &self.config.providers {
-                            if let Err(error) = provider.update(&update, &self.request).await {
-                                error!("Failed to update provider: {error}");
-                                failed = true;
+                            let provider = provider.clone();
+                            let update = update.clone();
+                            let request = self.request.clone();
+                            set.spawn(async move {
+                                provider.update(update, request).await
+                            });
+                        }
+                        let mut failed = false;
+                        while let Some(result) = set.join_next().await {
+                            match result {
+                                Ok(result) => {
+                                    if let Err(error) = result {
+                                        error!("Failed to update provider: {error}");
+                                        failed = true;
+                                    }
+                                },
+                                Err(error) => {
+                                    error!("Provider task failed to complete: {error}");
+                                }
                             }
                         }
                         if !failed {

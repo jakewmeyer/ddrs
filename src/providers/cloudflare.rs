@@ -2,23 +2,22 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 use smallvec::SmallVec;
-use tracing::{debug, error};
 
 use crate::client::{IpUpdate, IpVersion, Provider};
 
 const CLOUDFLARE_API: &str = "https://api.cloudflare.com/client/v4";
 
 /// Cloudflare DNS update provider
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Cloudflare {
     zone: String,
     api_token: String,
     domains: SmallVec<[Domains; 2]>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 struct Domains {
     name: String,
@@ -30,7 +29,9 @@ struct Domains {
 /// Zone lookup response
 #[derive(Debug, Deserialize)]
 struct ZoneList {
-    result: Vec<ZoneResult>,
+    result: Option<Vec<ZoneResult>>,
+    #[serde(rename = "errors")]
+    _errors: Vec<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -41,7 +42,9 @@ struct ZoneResult {
 /// Records lookup response
 #[derive(Debug, Deserialize)]
 struct RecordsList {
-    result: Vec<RecordResult>,
+    result: Option<Vec<RecordResult>>,
+    #[serde(rename = "errors")]
+    _errors: Vec<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -52,25 +55,24 @@ struct RecordResult {
 #[derive(Debug, Deserialize)]
 struct UpdatedResult {
     #[serde(rename = "errors")]
-    _errors: Vec<Option<serde_json::Value>>,
+    _errors: Vec<Option<Value>>,
     #[serde(rename = "messages")]
-    _messages: Vec<Option<serde_json::Value>>,
+    _messages: Vec<Option<Value>>,
     success: bool,
 }
 
 #[derive(Debug, Deserialize)]
 struct CreatedResult {
     #[serde(rename = "errors")]
-    _errors: Vec<Option<serde_json::Value>>,
-    #[serde(rename = "messages")]
-    _messages: Vec<Option<serde_json::Value>>,
+    _errors: Vec<Option<Value>>,
+    _messages: Vec<Option<Value>>,
     success: bool,
 }
 
 #[async_trait]
 #[typetag::serde(name = "cloudflare")]
 impl Provider for Cloudflare {
-    async fn update(&self, update: &IpUpdate, request: &Client) -> Result<bool> {
+    async fn update(&self, update: IpUpdate, request: Client) -> Result<bool> {
         let zones = request
             .get(format!("{CLOUDFLARE_API}/zones"))
             .query(&[("name", &self.zone)])
@@ -79,8 +81,13 @@ impl Provider for Cloudflare {
             .await?
             .json::<ZoneList>()
             .await?;
-        let zone_id = &zones.result.first().ok_or(anyhow!("No zone found"))?.id;
-        debug!("Found zone ID: {}", zone_id);
+        let zone_result = zones
+            .result
+            .ok_or(anyhow!("Failed to list Cloudflare zones"))?;
+        let zone_id = &zone_result
+            .first()
+            .ok_or(anyhow!("Failed to find a matching Cloudflare zone"))?
+            .id;
         for domain in &self.domains {
             for (version, address) in update.as_array() {
                 if let Some(address) = address {
@@ -97,11 +104,7 @@ impl Provider for Cloudflare {
                         .await?
                         .json::<RecordsList>()
                         .await?;
-                    if let Some(record) = records.result.first() {
-                        debug!(
-                            "Updating {:?} record for {} to {}",
-                            version, domain.name, address
-                        );
+                    if let Some(record) = records.result.and_then(|vec| vec.into_iter().next()) {
                         let updated = request
                             .put(format!(
                                 "{CLOUDFLARE_API}/zones/{zone_id}/dns_records/{0}",
@@ -120,51 +123,36 @@ impl Provider for Cloudflare {
                             .await?
                             .json::<UpdatedResult>()
                             .await?;
-                        if updated.success {
-                            debug!("Record updated: {:#?}", updated);
-                        } else {
-                            error!(
-                                "Failed to update domain ({}) record: {:#?}",
-                                domain.name, updated
-                            );
+                        if !updated.success {
                             return Err(anyhow!(
-                                "Failed to update domain ({}) record",
+                                "Failed to update Cloudflare domain ({}) record",
                                 domain.name
                             ));
                         }
-                    } else {
-                        debug!(
-                            "Creating {:?} record for {} to {}",
-                            version, domain.name, address
-                        );
-                        let created = request
-                            .post(format!("{CLOUDFLARE_API}/zones/{zone_id}/dns_records"))
-                            .json(&json!({
-                                "type": record_type,
-                                "name": domain.name,
-                                "content": address,
-                                "ttl": domain.ttl,
-                                "proxied": domain.proxied,
-                                "comment": domain.comment,
-                            }))
-                            .bearer_auth(&self.api_token)
-                            .send()
-                            .await?
-                            .json::<CreatedResult>()
-                            .await?;
-                        if created.success {
-                            debug!("Record created: {:#?}", created);
-                        } else {
-                            error!(
-                                "Failed to create domain ({}) record: {:#?}",
-                                domain.name, created
-                            );
-                            return Err(anyhow!(
-                                "Failed to create domain ({}) record",
-                                domain.name
-                            ));
-                        }
-                    };
+                        return Ok(true);
+                    }
+                    let created = request
+                        .post(format!("{CLOUDFLARE_API}/zones/{zone_id}/dns_records"))
+                        .json(&json!({
+                            "type": record_type,
+                            "name": domain.name,
+                            "content": address,
+                            "ttl": domain.ttl,
+                            "proxied": domain.proxied,
+                            "comment": domain.comment,
+                        }))
+                        .bearer_auth(&self.api_token)
+                        .send()
+                        .await?
+                        .json::<CreatedResult>()
+                        .await?;
+                    if !created.success {
+                        return Err(anyhow!(
+                            "Failed to create Cloudflare domain ({}) record",
+                            domain.name
+                        ));
+                    }
+                    return Ok(true);
                 }
             }
         }
