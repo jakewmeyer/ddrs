@@ -16,6 +16,11 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install nextest
+        uses: taiki-e/install-action@v2
+        with:
+            tool: nextest
+
       - name: Caching
         uses: Swatinem/rust-cache@v2
 
@@ -26,10 +31,7 @@ jobs:
         run: cargo clippy --all-targets --all-features
 
       - name: Run tests
-        uses: taiki-e/install-action@v2
-        with:
-            tool: nextest
-            run: cargo nextest run --all-targets --all-features
+        run: cargo nextest run --all-targets --all-features
 
   push-image:
     name: Push Image
