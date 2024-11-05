@@ -50,8 +50,14 @@ pub enum IpSource {
 /// Update sent to each provider
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IpUpdate {
-    v4: Option<IpAddr>,
-    v6: Option<IpAddr>,
+    pub v4: Option<IpAddr>,
+    pub v6: Option<IpAddr>,
+}
+
+impl IpUpdate {
+    pub fn as_array(&self) -> [(IpVersion, Option<IpAddr>); 2] {
+        [(IpVersion::V4, self.v4), (IpVersion::V6, self.v6)]
+    }
 }
 
 impl Display for IpUpdate {
@@ -62,12 +68,6 @@ impl Display for IpUpdate {
             self.v4.map_or("None".to_string(), |ip| ip.to_string()),
             self.v6.map_or("None".to_string(), |ip| ip.to_string())
         )
-    }
-}
-
-impl IpUpdate {
-    pub fn as_array(&self) -> [(IpVersion, Option<IpAddr>); 2] {
-        [(IpVersion::V4, self.v4), (IpVersion::V6, self.v6)]
     }
 }
 
