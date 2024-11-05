@@ -26,7 +26,10 @@ jobs:
         run: cargo clippy --all-targets --all-features
 
       - name: Run tests
-        run: cargo test --all-targets --all-features
+        uses: taiki-e/install-action@v2
+        with:
+            tool: nextest
+            run: cargo nextest run --all-targets --all-features
 
   push-image:
     name: Push Image
