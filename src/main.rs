@@ -39,6 +39,8 @@ async fn main() -> Result<()> {
 
     let config = toml::from_str::<Config>(&std::fs::read_to_string(config_path)?)?;
 
+    dbg!(&config);
+
     if config.providers.is_empty() {
         return Err(anyhow!("No providers configured"));
     }

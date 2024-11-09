@@ -86,9 +86,9 @@ impl Provider for Cloudflare {
             .await?
             .json::<ZoneList>()
             .await?;
-        let zone_result = zones
-            .result
-            .ok_or(anyhow!("Failed to list Cloudflare zones"))?;
+        let zone_result = zones.result.ok_or(anyhow!(
+            "Failed to list Cloudflare zones, is your token valid?"
+        ))?;
         let zone_id = &zone_result
             .first()
             .ok_or(anyhow!("Failed to find a matching Cloudflare zone"))?
@@ -228,7 +228,10 @@ mod tests {
             .update(UPDATE_BOTH, Client::new())
             .await
             .unwrap_err();
-        assert_eq!(error.to_string(), "Failed to list Cloudflare zones");
+        assert_eq!(
+            error.to_string(),
+            "Failed to list Cloudflare zones, is your token valid?"
+        );
     }
 
     #[tokio::test]

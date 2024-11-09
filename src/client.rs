@@ -15,6 +15,7 @@ use tokio::task::{JoinHandle, JoinSet};
 use tokio::time;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info};
+use url::Url;
 
 use stun::agent::TransactionId;
 use stun::client::ClientBuilder;
@@ -105,64 +106,66 @@ impl Client {
 
     /// Fetches the IP address via a STUN request to a public server
     async fn fetch_ip_stun(&self, version: &IpVersion) -> Result<IpAddr> {
-        let resolved = resolve_host(&self.resolver, &self.config.stun_url).await?;
-        let (handler_tx, mut handler_rx) = tokio::sync::mpsc::unbounded_channel();
-        let bind_address = match version {
-            IpVersion::V4 => "0:0",
-            IpVersion::V6 => "[::]:0",
-        };
-        let conn = UdpSocket::bind(bind_address).await?;
-        let stun_ip = match version {
-            IpVersion::V4 => {
-                if let Some(v4) = resolved.v4 {
-                    SocketAddr::new(IpAddr::V4(v4), self.config.stun_port)
-                } else {
-                    error!(
-                        "Failed to create ipv4 socket address for STUN server, is ipv4 enabled?"
-                    );
-                    return Err(anyhow!(
-                        "Failed to create ipv4 socket address for STUN server, is ipv4 enabled?"
-                    ));
-                }
-            }
-            IpVersion::V6 => {
-                if let Some(v6) = resolved.v6 {
-                    SocketAddr::new(IpAddr::V6(v6), self.config.stun_port)
-                } else {
-                    error!(
-                        "Failed to create ipv6 socket address for STUN server, is ipv6 enabled?"
-                    );
-                    return Err(anyhow!(
-                        "Failed to create ipv6 socket address for STUN server, is ipv6 enabled?"
-                    ));
-                }
-            }
-        };
-        if let Err(e) = conn.connect(stun_ip).await {
-            return Err(anyhow!(e).context("Failed to connect to STUN server"));
-        }
-        let mut client = ClientBuilder::new().with_conn(Arc::new(conn)).build()?;
-        let mut msg = Message::new();
-        msg.build(&[Box::<TransactionId>::default(), Box::new(BINDING_REQUEST)])?;
-        let handler = Arc::new(handler_tx);
-        client.send(&msg, Some(handler.clone())).await?;
-        if let Some(event) = handler_rx.recv().await {
-            let msg = event.event_body?;
-            let mut xor_addr = XorMappedAddress {
-                ip: match version {
-                    IpVersion::V4 => IpAddr::V4(Ipv4Addr::from(0)),
-                    IpVersion::V6 => IpAddr::V6(Ipv6Addr::from(0)),
-                },
-                port: 0,
+        for url in &self.config.stun_urls {
+            let url = Url::parse(url)?;
+            let host = url
+                .host_str()
+                .ok_or(anyhow!("Unable to parse host for url: {}", url))?;
+            let port = url
+                .port()
+                .ok_or(anyhow!("Unable to parse port for url: {}", url))?;
+            let resolved = resolve_host(&self.resolver, host).await?;
+            let (handler_tx, mut handler_rx) = tokio::sync::mpsc::unbounded_channel();
+            let bind_address = match version {
+                IpVersion::V4 => "0:0",
+                IpVersion::V6 => "[::]:0",
             };
-            xor_addr.get_from(&msg)?;
+            let conn = UdpSocket::bind(bind_address).await?;
+            let stun_ip = match version {
+                IpVersion::V4 => {
+                    if let Some(v4) = resolved.v4 {
+                        SocketAddr::new(IpAddr::V4(v4), port)
+                    } else {
+                        return Err(anyhow!(
+                        "Failed to create ipv4 socket address for STUN server, is ipv4 enabled?"
+                    ));
+                    }
+                }
+                IpVersion::V6 => {
+                    if let Some(v6) = resolved.v6 {
+                        SocketAddr::new(IpAddr::V6(v6), port)
+                    } else {
+                        return Err(anyhow!(
+                        "Failed to create ipv6 socket address for STUN server, is ipv6 enabled?"
+                    ));
+                    }
+                }
+            };
+            if let Err(e) = conn.connect(stun_ip).await {
+                return Err(anyhow!(e).context("Failed to connect to STUN server"));
+            }
+            let mut client = ClientBuilder::new().with_conn(Arc::new(conn)).build()?;
+            let mut msg = Message::new();
+            msg.build(&[Box::<TransactionId>::default(), Box::new(BINDING_REQUEST)])?;
+            let handler = Arc::new(handler_tx);
+            client.send(&msg, Some(handler.clone())).await?;
+            if let Some(event) = handler_rx.recv().await {
+                let msg = event.event_body?;
+                let mut xor_addr = XorMappedAddress {
+                    ip: match version {
+                        IpVersion::V4 => IpAddr::V4(Ipv4Addr::from(0)),
+                        IpVersion::V6 => IpAddr::V6(Ipv6Addr::from(0)),
+                    },
+                    port: 0,
+                };
+                xor_addr.get_from(&msg)?;
+                client.close().await?;
+                return Ok(xor_addr.ip);
+            }
             client.close().await?;
-            Ok(xor_addr.ip)
-        } else {
-            client.close().await?;
-            error!("Failed to receive STUN response");
-            Err(anyhow!("Failed to receive STUN response"))
+            continue;
         }
+        Err(anyhow!("Failed to fetch IP address via STUN"))
     }
 
     /// Fetches the IP address via a HTTP request
@@ -179,7 +182,6 @@ impl Client {
                 }
             }
         }
-        error!("Failed to fetch IP address from HTTP");
         Err(anyhow!("Failed to fetch IP address from HTTP"))
     }
 
@@ -204,14 +206,18 @@ impl Client {
                             v6: None,
                         };
                         for version in &self.config.versions {
-                            if let Some(ip) = match &self.config.source {
-                                IpSource::Stun => self.fetch_ip_stun(version).await.ok(),
-                                IpSource::Http => self.fetch_ip_http(version).await.ok(),
-                                IpSource::Interface(interface) => fetch_ip_interface(interface, version).ok(),
-                            } {
-                                match version {
+                            let ip_result = match &self.config.source {
+                                IpSource::Stun => self.fetch_ip_stun(version).await,
+                                IpSource::Http => self.fetch_ip_http(version).await,
+                                IpSource::Interface(interface) => fetch_ip_interface(interface, version),
+                            };
+                            match ip_result {
+                                Ok(ip) => match version {
                                     IpVersion::V4 => update.v4 = Some(ip),
                                     IpVersion::V6 => update.v6 = Some(ip),
+                                },
+                                Err(error) => {
+                                    error!("Error fetching IP: {}", error);
                                 }
                             }
                         }
@@ -224,7 +230,7 @@ impl Client {
                             info!("Dry run mode enabled, skipping update...");
                             continue;
                         }
-                        info!("IP address update detected, updating providers...");
+                        info!("IP address update detected, updating with IP(s): {update}");
 
                         let mut set = JoinSet::new();
                         for provider in &self.config.providers {
@@ -250,7 +256,7 @@ impl Client {
                             }
                         }
                         if !failed {
-                            info!("Providers updated successfully wih IP(s): {update}");
+                            info!("All providers updated successfully");
                             let mut cache = self.cache.write().await;
                             *cache = update;
                         }
@@ -315,7 +321,6 @@ fn fetch_ip_interface(interface: &IpSourceInterface, version: &IpVersion) -> Res
             }
         }
     }
-    error!("Failed to find network interface: {}", interface.name);
     Err(anyhow!(
         "Failed to find network interface: {}",
         interface.name

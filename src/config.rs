@@ -18,10 +18,8 @@ pub struct Config {
     pub versions: SmallVec<[IpVersion; 2]>,
     /// Toggle dry run mode
     pub dry_run: bool,
-    /// STUN server address
-    pub stun_url: String,
-    /// STUN server port
-    pub stun_port: u16,
+    /// STUN servers with port
+    pub stun_urls: SmallVec<[String; 3]>,
     /// HTTP servers for IPv4 address checks
     pub http_ipv4: SmallVec<[String; 3]>,
     /// HTTP servers for IPv6 address checks
@@ -33,12 +31,15 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            interval: Duration::from_secs(10),
+            interval: Duration::from_secs(30),
             source: IpSource::Stun,
             versions: smallvec![IpVersion::V4],
             dry_run: false,
-            stun_url: String::from("stun.l.google.com"),
-            stun_port: 19302,
+            stun_urls: smallvec![
+                String::from("stun://stun.l.google.com:19302"),
+                String::from("stun://stun.cloudflare.com:3478"),
+                String::from("stun://global.stun.twilio.com:3478"),
+            ],
             http_ipv4: smallvec![
                 String::from("https://api.ipify.org"),
                 String::from("https://ipv4.icanhazip.com"),
