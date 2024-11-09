@@ -1,0 +1,77 @@
+name: release
+
+on:
+  workflow_dispatch:
+  release:
+    types: [ created ]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.platform.os_name }} with rust ${{ matrix.toolchain }}
+    runs-on: ${{ matrix.platform.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - os-name: Linux-x86_64-musl
+            runs-on: ubuntu-20.04
+            target: x86_64-unknown-linux-musl
+
+          - os-name: Linux-aarch64-musl
+            runs-on: ubuntu-20.04
+            target: aarch64-unknown-linux-musl
+
+          - os-name: Linux-x86_64-gnu
+            runs-on: ubuntu-20.04
+            target: x86_64-unknown-linux-gnu
+
+          - os-name: Linux-aarch64-gnu
+            runs-on: ubuntu-20.04
+            target: aarch64-unknown-linux-gnu
+
+          - os-name: macOS-aarch64
+            runs-on: macOS-latest
+            target: aarch64-apple-darwin
+
+          - os-name: macOS-x86_64
+            runs-on: macOS-latest
+            target: x86_64-apple-darwin
+
+          - os-name: Windows-x86_64-msvc
+            runs-on: windows-latest
+            target: x86_64-pc-windows-msvc
+
+          - os-name: Windows-aarch64-msvc
+            runs-on: windows-latest
+            target: aarch64-pc-windows-msvc
+
+          - os-name: Windows-x86_64-gnu
+            runs-on: windows-latest
+            target: x86_64-pc-windows-gnu
+
+          - os-name: FreeBSD-x86_64
+            runs-on: ubuntu-20.04
+            target: x86_64-unknown-freebsd
+            skip_tests: true
+        toolchain:
+          - stable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Build binary
+        uses: houseabsolute/actions-rust-cross@v0
+        with:
+          command: "build"
+          target: ${{ matrix.platform.target }}
+          toolchain: "stable"
+          args: "--locked --release"
+          strip: true
+      - name: Publish artifacts and release
+        uses: houseabsolute/actions-rust-release@v0
+        with:
+          executable-name: ddrs
+          target: ${{ matrix.platform.target }}
+        if: matrix.toolchain == 'stable'
