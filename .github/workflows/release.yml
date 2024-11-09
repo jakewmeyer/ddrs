@@ -73,5 +73,6 @@ jobs:
         uses: houseabsolute/actions-rust-release@v0
         with:
           executable-name: ddrs
+          changes-file: CHANGELOG.md
           target: ${{ matrix.platform.target }}
         if: matrix.toolchain == 'stable'
