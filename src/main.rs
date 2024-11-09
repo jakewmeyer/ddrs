@@ -54,13 +54,17 @@ async fn main() -> Result<()> {
             .expect("failed to install Ctrl+C handler");
     };
 
-    // Handle SIGTERM
+    // Unix SIGTERM
+    #[cfg(unix)]
     let terminate = async {
         signal::unix::signal(signal::unix::SignalKind::terminate())
             .expect("failed to install signal handler")
             .recv()
             .await;
     };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending();
 
     let graceful = client.clone();
     let client_handle = client.run();
