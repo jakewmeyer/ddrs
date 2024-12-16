@@ -66,11 +66,12 @@ type = "stun"
 * `type` - The provider type. Must be `cloudflare`
 * `zone` - The zone root domain to update
 * `api_token` - Cloudflare API token with the `Zone.DNS Edit` permission
+* `api_url` - Optional API URL, default is `https://api.cloudflare.com/client/v4`
 * `domains` - A list of domains to update
   * `name` - The full domain name to update (Required)
   * `ttl` - The TTL for the record, default is `1` (Auto)
   * `proxied` - Whether the record is proxied through Cloudflare, default is `false`
-  * `comment` - A comment to add to the record
+  * `comment` - A comment to add to the record, default is `Created by DDRS`
 
 ```toml
 [[providers]]
@@ -79,16 +80,22 @@ zone = "domain.com"
 api_token = "TOKEN"
 
 [[providers.domains]]
+name = "domain.com"
+ttl = 1
+proxied = false
+comment = "Root domain"
+
+[[providers.domains]]
 name = "*.domain.com"
 ttl = 1
 proxied = false
 comment = "Wildcard subdomain"
 
 [[providers.domains]]
-name = "domain.com"
+name = "sub.domain.com"
 ttl = 1
 proxied = false
-comment = "Root domain"
+comment = "Subdomain"
 ```
 
 ## Deployment
