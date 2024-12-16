@@ -132,7 +132,7 @@ impl Cloudflare {
             ))
             .json(&json!({
                 "type": record_type,
-                "name": domain,
+                "name": domain.name,
                 "content": address,
                 "ttl": domain.ttl,
                 "proxied": domain.proxied,
@@ -164,7 +164,7 @@ impl Cloudflare {
             .post(format!("{}/zones/{}/dns_records", self.api_url, zone_id))
             .json(&json!({
                 "type": record_type,
-                "name": domain,
+                "name": domain.name,
                 "content": address,
                 "ttl": domain.ttl,
                 "proxied": domain.proxied,
@@ -202,7 +202,6 @@ impl Provider for Cloudflare {
                         .await?
                         .first()
                     {
-                        println!("Updating record: {}", record.id);
                         self.update_dns_record(
                             &request,
                             &zone_id,
@@ -213,7 +212,6 @@ impl Provider for Cloudflare {
                         )
                         .await?;
                     } else {
-                        println!("Creating record");
                         self.create_dns_record(&request, &zone_id, record_type, domain, &addr)
                             .await?;
                     }
