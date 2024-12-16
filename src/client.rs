@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use core::fmt;
 use dyn_clone::DynClone;
@@ -207,9 +207,9 @@ impl Client {
                         };
                         for version in &self.config.versions {
                             let ip_result = match &self.config.source {
-                                IpSource::Stun => self.fetch_ip_stun(version).await,
-                                IpSource::Http => self.fetch_ip_http(version).await,
-                                IpSource::Interface(interface) => fetch_ip_interface(interface, version),
+                                IpSource::Stun => self.fetch_ip_stun(version).await.context("Failed to fetch IP via STUN"),
+                                IpSource::Http => self.fetch_ip_http(version).await.context("Failed to fetch IP via HTTP"),
+                                IpSource::Interface(interface) => fetch_ip_interface(interface, version).context("Failed to fetch IP via interface"),
                             };
                             match ip_result {
                                 Ok(ip) => match version {
@@ -220,6 +220,10 @@ impl Client {
                                     error!("Error fetching IP: {}", error);
                                 }
                             }
+                        }
+                        if update.v4.is_none() && update.v6.is_none() {
+                            error!("Failed to fetch IP address, skipping update...");
+                            continue;
                         }
                         debug!("Found IP(s): {update}");
                         if update == *self.cache.read().await {
@@ -246,7 +250,7 @@ impl Client {
                             match result {
                                 Ok(result) => {
                                     if let Err(error) = result {
-                                        error!("Failed to update provider: {error}");
+                                        error!("Error updating provider: {error}");
                                         failed = true;
                                     }
                                 },
