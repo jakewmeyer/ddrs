@@ -2,8 +2,8 @@ use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use core::fmt;
 use dyn_clone::DynClone;
-use hickory_resolver::config::{LookupIpStrategy, ResolverConfig, ResolverOpts};
-use hickory_resolver::TokioAsyncResolver;
+use hickory_resolver::config::LookupIpStrategy;
+use hickory_resolver::{Resolver, TokioResolver};
 use local_ip_address::list_afinet_netifas;
 use reqwest::Client as HttpClient;
 use serde::{Deserialize, Serialize};
@@ -88,19 +88,21 @@ pub struct Client {
     cache: RwLock<IpUpdate>,
     request: HttpClient,
     shutdown: CancellationToken,
-    resolver: TokioAsyncResolver,
+    resolver: TokioResolver,
 }
 
 impl Client {
     pub fn new(config: Config) -> Arc<Client> {
-        let mut resolver_opts = ResolverOpts::default();
+        let mut resolver_builder = Resolver::builder_tokio().unwrap();
+        let resolver_opts = resolver_builder.options_mut();
         resolver_opts.ip_strategy = LookupIpStrategy::Ipv4AndIpv6;
+
         Arc::new(Client {
             config,
             cache: RwLock::new(IpUpdate { v4: None, v6: None }),
             request: HttpClient::new(),
             shutdown: CancellationToken::new(),
-            resolver: TokioAsyncResolver::tokio(ResolverConfig::default(), resolver_opts),
+            resolver: resolver_builder.build(),
         })
     }
 
@@ -163,7 +165,6 @@ impl Client {
                 return Ok(xor_addr.ip);
             }
             client.close().await?;
-            continue;
         }
         Err(anyhow!("Failed to fetch IP address via STUN"))
     }
@@ -285,7 +286,7 @@ struct HostResponse {
 }
 
 /// Resolve a host to an IP address
-async fn resolve_host(resolver: &TokioAsyncResolver, host: &str) -> Result<HostResponse> {
+async fn resolve_host(resolver: &TokioResolver, host: &str) -> Result<HostResponse> {
     let mut ipv4 = None;
     let mut ipv6 = None;
     let response = resolver.lookup_ip(host).await?;
