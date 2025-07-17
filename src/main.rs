@@ -4,7 +4,7 @@
 
 use std::{ffi::OsString, path::Path};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use clap::Parser;
 use client::Client;
 use tokio::signal;

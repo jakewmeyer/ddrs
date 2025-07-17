@@ -1,6 +1,6 @@
 use std::net::IpAddr;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use compact_str::CompactString;
 use reqwest::Client;
@@ -227,8 +227,8 @@ mod tests {
 
     use smallvec::smallvec;
     use wiremock::{
-        matchers::{bearer_token, method, path, query_param},
         Mock, MockServer, ResponseTemplate,
+        matchers::{bearer_token, method, path, query_param},
     };
 
     use super::*;

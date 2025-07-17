@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use core::fmt;
 use dyn_clone::DynClone;
@@ -18,7 +18,7 @@ use tracing::{debug, error, info};
 use url::Url;
 
 use stun::agent::TransactionId;
-use stun::message::{Getter, Message, BINDING_REQUEST};
+use stun::message::{BINDING_REQUEST, Getter, Message};
 use stun::xoraddr::XorMappedAddress;
 use tokio::net::UdpSocket;
 
@@ -129,8 +129,8 @@ impl Client {
                         SocketAddr::new(IpAddr::V4(v4), port)
                     } else {
                         return Err(anyhow!(
-                        "Failed to create ipv4 socket address for STUN server, is ipv4 enabled?"
-                    ));
+                            "Failed to create ipv4 socket address for STUN server, is ipv4 enabled?"
+                        ));
                     }
                 }
                 IpVersion::V6 => {
@@ -138,8 +138,8 @@ impl Client {
                         SocketAddr::new(IpAddr::V6(v6), port)
                     } else {
                         return Err(anyhow!(
-                        "Failed to create ipv6 socket address for STUN server, is ipv6 enabled?"
-                    ));
+                            "Failed to create ipv6 socket address for STUN server, is ipv6 enabled?"
+                        ));
                     }
                 }
             };
