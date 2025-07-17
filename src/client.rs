@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display, Formatter};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::task::{JoinHandle, JoinSet};
 use tokio::time;
@@ -23,6 +24,8 @@ use stun::xoraddr::XorMappedAddress;
 use tokio::net::UdpSocket;
 
 use crate::config::Config;
+
+static USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"),);
 
 /// IP version without associated address
 #[derive(Debug, Serialize, Deserialize)]
@@ -101,7 +104,11 @@ impl Client {
         Arc::new(Client {
             config,
             cache: RwLock::new(IpUpdate { v4: None, v6: None }),
-            request: HttpClient::new(),
+            request: HttpClient::builder()
+                .timeout(Duration::from_secs(30))
+                .user_agent(USER_AGENT)
+                .build()
+                .expect("Failed to build HTTP client"),
             shutdown: CancellationToken::new(),
             resolver: resolver_builder.build(),
         })
@@ -109,14 +116,19 @@ impl Client {
 
     /// Fetches the IP address via a STUN request to a public server
     async fn fetch_ip_stun(&self, version: &IpVersion) -> Result<IpAddr> {
+        let mut last_error = None;
+        let timeout = Duration::from_secs(5);
         for url in &self.config.stun_urls {
+            if let Some(error) = last_error {
+                error!("STUN fetch error: {}", error);
+            }
             let url = Url::parse(url)?;
             let host = url
                 .host_str()
-                .ok_or(anyhow!("Unable to parse host for url: {}", url))?;
+                .ok_or(anyhow!("Unable to parse host for STUN url: {}", url))?;
             let port = url
                 .port()
-                .ok_or(anyhow!("Unable to parse port for url: {}", url))?;
+                .ok_or(anyhow!("Unable to parse port for STUN url: {}", url))?;
             let resolved = resolve_host(&self.resolver, host).await?;
             let bind_address = match version {
                 IpVersion::V4 => "0:0",
@@ -143,29 +155,57 @@ impl Client {
                     }
                 }
             };
-            if let Err(e) = sock.connect(stun_ip).await {
-                return Err(anyhow!(e).context("Failed to connect to STUN server"));
+            if let Err(e) = tokio::time::timeout(timeout, sock.connect(stun_ip)).await {
+                last_error = Some(anyhow!(e).context(format!(
+                    "Failed to connect to STUN server: {url} at IP: {stun_ip}"
+                )));
+                continue;
             }
             let mut msg = Message::new();
             msg.build(&[Box::<TransactionId>::default(), Box::new(BINDING_REQUEST)])?;
             let bytes = msg.marshal_binary()?;
             sock.send(&bytes).await?;
+            if let Err(e) = tokio::time::timeout(timeout, sock.send(&bytes)).await {
+                last_error = Some(
+                    anyhow!(e).context(format!("Failed to send packet to STUN server: {url}")),
+                );
+                continue;
+            }
             let mut res_buff = [0; 1024];
-            if sock.recv(&mut res_buff).await.is_ok() {
-                let mut res_msg = Message::new();
-                res_msg.unmarshal_binary(&res_buff)?;
-                let mut xor_addr = XorMappedAddress {
-                    ip: match version {
-                        IpVersion::V4 => IpAddr::V4(Ipv4Addr::from(0)),
-                        IpVersion::V6 => IpAddr::V6(Ipv6Addr::from(0)),
-                    },
-                    port: 0,
-                };
-                xor_addr.get_from(&res_msg)?;
-                return Ok(xor_addr.ip);
+            if let Err(e) = tokio::time::timeout(timeout, sock.recv(&mut res_buff)).await {
+                last_error = Some(
+                    anyhow!(e).context(format!("Failed to receive packet from STUN server: {url}")),
+                );
+                continue;
+            }
+            match tokio::time::timeout(timeout, sock.recv(&mut res_buff)).await {
+                Ok(res) => match res {
+                    Ok(_) => {
+                        let mut res_msg = Message::new();
+                        res_msg.unmarshal_binary(&res_buff)?;
+                        let mut xor_addr = XorMappedAddress {
+                            ip: match version {
+                                IpVersion::V4 => IpAddr::V4(Ipv4Addr::from(0)),
+                                IpVersion::V6 => IpAddr::V6(Ipv6Addr::from(0)),
+                            },
+                            port: 0,
+                        };
+                        xor_addr.get_from(&res_msg)?;
+                        return Ok(xor_addr.ip);
+                    }
+                    Err(e) => {
+                        last_error =
+                            Some(anyhow!(e).context(format!(
+                                "Failed to receive packet from STUN server: {url}"
+                            )));
+                    }
+                },
+                Err(_) => {
+                    last_error = Some(anyhow!("Timeout waiting for STUN response"));
+                }
             }
         }
-        Err(anyhow!("Failed to fetch IP address via STUN"))
+        Err(last_error.unwrap_or_else(|| anyhow!("No STUN servers available")))
     }
 
     /// Fetches the IP address via a HTTP request
