@@ -192,30 +192,28 @@ impl Provider for Cloudflare {
     async fn update(&self, update: IpUpdate, request: Client) -> Result<bool> {
         let zone_id = self.fetch_zone_id(&request).await?;
         for domain in &self.domains {
-            for (version, address) in update.as_array() {
-                if let Some(addr) = address {
-                    let record_type = match version {
-                        IpVersion::V4 => "A",
-                        IpVersion::V6 => "AAAA",
-                    };
-                    if let Some(record) = self
-                        .fetch_dns_records(&request, &zone_id, record_type, domain)
-                        .await?
-                        .first()
-                    {
-                        self.update_dns_record(
-                            &request,
-                            &zone_id,
-                            &record.id,
-                            record_type,
-                            domain,
-                            &addr,
-                        )
+            for (version, addr) in update.iter() {
+                let record_type = match version {
+                    IpVersion::V4 => "A",
+                    IpVersion::V6 => "AAAA",
+                };
+                if let Some(record) = self
+                    .fetch_dns_records(&request, &zone_id, record_type, domain)
+                    .await?
+                    .first()
+                {
+                    self.update_dns_record(
+                        &request,
+                        &zone_id,
+                        &record.id,
+                        record_type,
+                        domain,
+                        &addr,
+                    )
+                    .await?;
+                } else {
+                    self.create_dns_record(&request, &zone_id, record_type, domain, &addr)
                         .await?;
-                    } else {
-                        self.create_dns_record(&request, &zone_id, record_type, domain, &addr)
-                            .await?;
-                    }
                 }
             }
         }
@@ -236,16 +234,16 @@ mod tests {
     use super::*;
 
     const UPDATE_BOTH: IpUpdate = IpUpdate {
-        v4: Some(IpAddr::V4(Ipv4Addr::LOCALHOST)),
-        v6: Some(IpAddr::V6(Ipv6Addr::LOCALHOST)),
+        v4: Some(Ipv4Addr::LOCALHOST),
+        v6: Some(Ipv6Addr::LOCALHOST),
     };
     const UPDATE_V4: IpUpdate = IpUpdate {
-        v4: Some(IpAddr::V4(Ipv4Addr::LOCALHOST)),
+        v4: Some(Ipv4Addr::LOCALHOST),
         v6: None,
     };
     const UPDATE_V6: IpUpdate = IpUpdate {
         v4: None,
-        v6: Some(IpAddr::V6(Ipv6Addr::LOCALHOST)),
+        v6: Some(Ipv6Addr::LOCALHOST),
     };
 
     #[tokio::test]

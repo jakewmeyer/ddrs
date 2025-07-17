@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2025-07-16
+
+### Changed
+
+- Updated STUN implementation to send/receive messages on the UDP socket directly
+now that the stun v0.8.0 client is no longer `Sync`.
+- Updated `IpUpdate` to use `Ipv4Addr` and `Ipv6Addr` instead of `IpAddr` to
+  avoid unnecessary conversions.
+- Updated Rust edition to 2024
+
 ## [0.3.0] - 2024-12-16
 
 ### Fixed

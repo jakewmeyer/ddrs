@@ -18,7 +18,6 @@ use tracing::{debug, error, info};
 use url::Url;
 
 use stun::agent::TransactionId;
-use stun::client::ClientBuilder;
 use stun::message::{Getter, Message, BINDING_REQUEST};
 use stun::xoraddr::XorMappedAddress;
 use tokio::net::UdpSocket;
@@ -51,13 +50,15 @@ pub enum IpSource {
 /// Update sent to each provider
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IpUpdate {
-    pub v4: Option<IpAddr>,
-    pub v6: Option<IpAddr>,
+    pub v4: Option<Ipv4Addr>,
+    pub v6: Option<Ipv6Addr>,
 }
 
 impl IpUpdate {
-    pub fn as_array(&self) -> [(IpVersion, Option<IpAddr>); 2] {
-        [(IpVersion::V4, self.v4), (IpVersion::V6, self.v6)]
+    pub fn iter(&self) -> impl Iterator<Item = (IpVersion, IpAddr)> + '_ {
+        let v4 = self.v4.map(|addr| (IpVersion::V4, IpAddr::V4(addr)));
+        let v6 = self.v6.map(|addr| (IpVersion::V6, IpAddr::V6(addr)));
+        [v4, v6].into_iter().flatten()
     }
 }
 
@@ -117,12 +118,11 @@ impl Client {
                 .port()
                 .ok_or(anyhow!("Unable to parse port for url: {}", url))?;
             let resolved = resolve_host(&self.resolver, host).await?;
-            let (handler_tx, mut handler_rx) = tokio::sync::mpsc::unbounded_channel();
             let bind_address = match version {
                 IpVersion::V4 => "0:0",
                 IpVersion::V6 => "[::]:0",
             };
-            let conn = UdpSocket::bind(bind_address).await?;
+            let sock = UdpSocket::bind(bind_address).await?;
             let stun_ip = match version {
                 IpVersion::V4 => {
                     if let Some(v4) = resolved.v4 {
@@ -143,16 +143,17 @@ impl Client {
                     }
                 }
             };
-            if let Err(e) = conn.connect(stun_ip).await {
+            if let Err(e) = sock.connect(stun_ip).await {
                 return Err(anyhow!(e).context("Failed to connect to STUN server"));
             }
-            let mut client = ClientBuilder::new().with_conn(Arc::new(conn)).build()?;
             let mut msg = Message::new();
             msg.build(&[Box::<TransactionId>::default(), Box::new(BINDING_REQUEST)])?;
-            let handler = Arc::new(handler_tx);
-            client.send(&msg, Some(handler.clone())).await?;
-            if let Some(event) = handler_rx.recv().await {
-                let msg = event.event_body?;
+            let bytes = msg.marshal_binary()?;
+            sock.send(&bytes).await?;
+            let mut res_buff = [0; 1024];
+            if sock.recv(&mut res_buff).await.is_ok() {
+                let mut res_msg = Message::new();
+                res_msg.unmarshal_binary(&res_buff)?;
                 let mut xor_addr = XorMappedAddress {
                     ip: match version {
                         IpVersion::V4 => IpAddr::V4(Ipv4Addr::from(0)),
@@ -160,11 +161,9 @@ impl Client {
                     },
                     port: 0,
                 };
-                xor_addr.get_from(&msg)?;
-                client.close().await?;
+                xor_addr.get_from(&res_msg)?;
                 return Ok(xor_addr.ip);
             }
-            client.close().await?;
         }
         Err(anyhow!("Failed to fetch IP address via STUN"))
     }
@@ -214,8 +213,16 @@ impl Client {
                             };
                             match ip_result {
                                 Ok(ip) => match version {
-                                    IpVersion::V4 => update.v4 = Some(ip),
-                                    IpVersion::V6 => update.v6 = Some(ip),
+                                    IpVersion::V4 => {
+                                        if let IpAddr::V4(ip) = ip {
+                                            update.v4 = Some(ip);
+                                        }
+                                    },
+                                    IpVersion::V6 => {
+                                         if let IpAddr::V6(ip) = ip {
+                                            update.v6 = Some(ip);
+                                        }
+                                    }
                                 },
                                 Err(error) => {
                                     error!("Error fetching IP: {}", error);
@@ -231,11 +238,12 @@ impl Client {
                             debug!("No IP address change detected, skipping update...");
                             continue;
                         }
+                        info!("IP address update detected, updating with IP(s): {update}");
+
                         if self.config.dry_run {
                             info!("Dry run mode enabled, skipping update...");
                             continue;
                         }
-                        info!("IP address update detected, updating with IP(s): {update}");
 
                         let mut set = JoinSet::new();
                         for provider in &self.config.providers {
