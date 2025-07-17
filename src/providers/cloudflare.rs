@@ -223,7 +223,7 @@ impl Provider for Cloudflare {
 
 #[cfg(test)]
 mod tests {
-    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+    use std::net::{Ipv4Addr, Ipv6Addr};
 
     use smallvec::smallvec;
     use wiremock::{
