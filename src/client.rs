@@ -91,8 +91,10 @@ impl Client {
             config,
             cache: RwLock::new(IpUpdate { v4: None, v6: None }),
             request: HttpClient::builder()
-                .timeout(Duration::from_secs(30))
+                .timeout(Duration::from_secs(20))
+                .connect_timeout(Duration::from_secs(5))
                 .user_agent(USER_AGENT)
+                .http2_adaptive_window(true)
                 .build()
                 .expect("Failed to build HTTP client"),
             shutdown: CancellationToken::new(),

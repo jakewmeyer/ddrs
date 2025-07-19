@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2025-07-19
+
+### Added
+
+- Added aggressive connect timeout to allow quicker fallbacks on provider lookups
+
+### Changed
+
+- Added secrecy crate to protect provider api keys
+- Removed unused Serialize impls from config structs
+
 ## [0.5.0] - 2025-07-19
 
 ### Changed
