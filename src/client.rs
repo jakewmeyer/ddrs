@@ -8,7 +8,6 @@ use serde::Deserialize;
 use std::fmt::{Debug, Display, Formatter};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::task::{JoinHandle, JoinSet};
 use tokio::time;
@@ -87,16 +86,18 @@ pub struct Client {
 
 impl Client {
     pub fn new(config: Config) -> Arc<Client> {
+        let request = HttpClient::builder()
+            .timeout(config.timeout)
+            .connect_timeout(config.connect_timeout)
+            .user_agent(USER_AGENT)
+            .http2_adaptive_window(true)
+            .build()
+            .expect("Failed to build HTTP client");
+
         Arc::new(Client {
             config,
             cache: RwLock::new(IpUpdate { v4: None, v6: None }),
-            request: HttpClient::builder()
-                .timeout(Duration::from_secs(20))
-                .connect_timeout(Duration::from_secs(5))
-                .user_agent(USER_AGENT)
-                .http2_adaptive_window(true)
-                .build()
-                .expect("Failed to build HTTP client"),
+            request,
             shutdown: CancellationToken::new(),
         })
     }

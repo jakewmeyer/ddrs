@@ -18,6 +18,12 @@ pub struct Config {
     pub versions: SmallVec<[IpVersion; 2]>,
     /// Toggle dry run mode
     pub dry_run: bool,
+    // Total request timeout
+    #[serde(with = "humantime_serde")]
+    pub timeout: Duration,
+    /// Request connect timeout
+    #[serde(with = "humantime_serde")]
+    pub connect_timeout: Duration,
     /// HTTP servers for IPv4 address checks
     pub http_ipv4: SmallVec<[String; 3]>,
     /// HTTP servers for IPv6 address checks
@@ -33,6 +39,8 @@ impl Default for Config {
             source: IpSource::Http,
             versions: smallvec![IpVersion::V4],
             dry_run: false,
+            timeout: Duration::from_secs(10),
+            connect_timeout: Duration::from_secs(5),
             http_ipv4: smallvec![
                 String::from("https://api.ipify.org"),
                 String::from("https://ipv4.seeip.org"),

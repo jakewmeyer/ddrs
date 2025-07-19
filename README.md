@@ -4,13 +4,16 @@
 * IP lookups via HTTP(S) or local network interfaces
 * Support for multiple DNS providers
 * Support for multiple domains/subdomains
-* Support for IPv4 and IPv6
+* Support for IPv4, IPv6, or dual-stack
 
 ## Config
 The configuration file is in [TOML](https://toml.io/en/) format. The default location for the configuration file is `/etc/ddrs/config.toml`. A custom location can be specified with the `--config` flag.
 
-### Options
+### Config Structure
 * `versions` - IP version to fetch and update
+* `interval` - Interval to run the update loop (default: `30s`)
+* `timeout` - Total request timeout for HTTP requests (default: `10s`)
+* `connect_timeout` - Connect timeout for HTTP requests (default: `5s`)
 * `dry_run` - Fetch the IP address but do not update the DNS records
 * `http_ipv4` - A list of HTTP(S) URLs to use for IPv4 lookups
 * `http_ipv6` - A list of HTTP(S) URLs to use for IPv6 lookups
@@ -24,6 +27,12 @@ The configuration file is in [TOML](https://toml.io/en/) format. The default loc
 versions = ["v4"]
 
 # versions = ["v4", "v6"]
+
+interval = "30s"
+
+timeout = "10s"
+
+connect_timeout = "5s"
 
 dry_run = false
 
