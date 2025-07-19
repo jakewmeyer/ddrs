@@ -15,7 +15,7 @@ The configuration file is in [TOML](https://toml.io/en/) format. The default loc
 * `interval` - Interval to run the update loop (default: `30s`)
 * `timeout` - Total request timeout for HTTP requests (default: `10s`)
 * `connect_timeout` - Connect timeout for HTTP requests (default: `5s`)
-* `cache_path` - Path to the cache file for storing last known IP update (default: `/var/cache/ddrs/cache`)
+* `cache_path` - Path to the cache file for storing last known IP update (default: `/var/cache/ddrs/ddrs.bin`)
 * `dry_run` - Fetch the IP address but do not update the DNS records
 * `http_ipv4` - A list of HTTP(S) URLs to use for IPv4 lookups
 * `http_ipv6` - A list of HTTP(S) URLs to use for IPv6 lookups
@@ -121,6 +121,7 @@ services:
 ### Systemd
 * Save the binary to `/usr/local/bin/ddrs`
 * Save the configuration file to `/etc/ddrs/config.toml`
+* Create the ddrs user: `sudo useradd --system --no-create-home --shell /bin/false ddrs`
 * Create a systemd service file at `/etc/systemd/system/ddrs.service`
 * Reload systemd with `sudo systemctl daemon-reload`
 * Start the service with `sudo systemctl start ddrs`
@@ -137,14 +138,20 @@ Requires=network-online.target
 [Service]
 Type=simple
 User=ddrs
+Group=ddrs
 ExecStart=/usr/local/bin/ddrs
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-ProtectSystem=full
+
+# Cache directory
+CacheDirectory=ddrs
+CacheDirectoryMode=0750
 
 # Hardening
+ProtectSystem=strict
+ReadWritePaths=/var/cache/ddrs
 PrivateDevices=true
 PrivateTmp=true
 NoNewPrivileges=true
