@@ -1,7 +1,7 @@
 # DDRS - A dynamic DNS client written in Rust 🦀
 
 ## Features
-* IP lookups via [STUN](https://en.wikipedia.org/wiki/STUN), HTTP(S), or local network interfaces
+* IP lookups via HTTP(S) or local network interfaces
 * Support for multiple DNS providers
 * Support for multiple domains/subdomains
 * Support for IPv4 and IPv6
@@ -12,11 +12,10 @@ The configuration file is in [TOML](https://toml.io/en/) format. The default loc
 ### Options
 * `versions` - IP version to fetch and update
 * `dry_run` - Fetch the IP address but do not update the DNS records
-* `stun_urls` - A list of STUN servers to use for IP lookups
 * `http_ipv4` - A list of HTTP(S) URLs to use for IPv4 lookups
 * `http_ipv6` - A list of HTTP(S) URLs to use for IPv6 lookups
 * `source` - The source to use for IP lookups
-  * `type` - The source type. Must be `stun`, `http`, or `interface`
+  * `type` - The source type. Must `http` or `interface`
   * `name` - Only required for `interface` source type, (e.g. `eth0`, `wlan0`)
 
 ### Default Config
@@ -28,29 +27,20 @@ versions = ["v4"]
 
 dry_run = false
 
-stun_urls = [
-  "stun://stun.l.google.com:19302",
-  "stun://stun.cloudflare.com:3478",
-  "stun://global.stun.twilio.com:3478",
-]
-
 http_ipv4 = [
   "https://api.ipify.org",
-  "https://ipv4.icanhazip.com",
   "https://ipv4.seeip.org",
+  "https://ipv4.icanhazip.com",
 ]
 
 http_ipv6 = [
   "https://api6.ipify.org",
-  "https://ipv6.icanhazip.com",
   "https://ipv6.seeip.org",
+  "https://ipv6.icanhazip.com",
 ]
 
 [source]
-type = "stun"
-
-# [source]
-# type = "http"
+type = "http"
 
 # [source]
 # type = "interface"
