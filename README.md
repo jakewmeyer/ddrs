@@ -116,6 +116,7 @@ services:
     network_mode: "host"
     volumes:
       - ./config.toml:/etc/ddrs/config.toml
+      - ./cache:/var/cache/ddrs
 ```
 
 ### Systemd
