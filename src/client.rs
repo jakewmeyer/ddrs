@@ -4,7 +4,7 @@ use core::fmt;
 use dyn_clone::DynClone;
 use local_ip_address::list_afinet_netifas;
 use reqwest::Client as HttpClient;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::fmt::{Debug, Display, Formatter};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
@@ -20,7 +20,7 @@ use crate::config::Config;
 static USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"),);
 
 /// IP version without associated address
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IpVersion {
     V4,
@@ -28,13 +28,13 @@ pub enum IpVersion {
 }
 
 /// IP interface source serde representation
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct IpSourceInterface {
     name: String,
 }
 
 /// IP source for fetching the address
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum IpSource {
     Http,
@@ -69,7 +69,7 @@ impl Display for IpUpdate {
 
 /// Provider trait for updating DNS records or DDNS services
 #[async_trait]
-#[typetag::serde(tag = "type")]
+#[typetag::deserialize(tag = "type")]
 pub trait Provider: Debug + DynClone + Send + Sync {
     async fn update(&self, update: IpUpdate, request: HttpClient) -> Result<bool>;
 }

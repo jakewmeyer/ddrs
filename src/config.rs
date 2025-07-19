@@ -1,12 +1,12 @@
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use smallvec::{SmallVec, smallvec};
 
 use crate::client::{IpSource, IpVersion, Provider};
 
 /// Client configuration
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct Config {
     /// Interval between IP address checks
