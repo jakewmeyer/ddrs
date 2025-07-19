@@ -43,7 +43,7 @@ fn default_ttl() -> u32 {
 }
 
 fn default_comment() -> CompactString {
-    CompactString::from("Created by DDRS")
+    "Created by DDRS".into()
 }
 
 #[derive(Debug, Deserialize)]

@@ -14,6 +14,7 @@ use crate::config::Config;
 
 const CONFIG_PATH: &str = "/etc/ddrs/config.toml";
 
+mod cache;
 mod client;
 mod config;
 mod providers;

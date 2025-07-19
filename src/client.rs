@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
+use bincode::{Decode, Encode};
 use core::fmt;
 use dyn_clone::DynClone;
 use local_ip_address::list_afinet_netifas;
@@ -8,12 +9,12 @@ use serde::Deserialize;
 use std::fmt::{Debug, Display, Formatter};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tokio::task::{JoinHandle, JoinSet};
 use tokio::time;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
+use crate::cache::Cache;
 use crate::config::Config;
 
 static USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"),);
@@ -41,7 +42,7 @@ pub enum IpSource {
 }
 
 /// Update sent to each provider
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
 pub struct IpUpdate {
     pub v4: Option<Ipv4Addr>,
     pub v6: Option<Ipv6Addr>,
@@ -79,7 +80,7 @@ dyn_clone::clone_trait_object!(Provider);
 #[derive(Debug)]
 pub struct Client {
     config: Config,
-    cache: RwLock<IpUpdate>,
+    cache: Cache,
     request: HttpClient,
     shutdown: CancellationToken,
 }
@@ -91,14 +92,16 @@ impl Client {
             .connect_timeout(config.connect_timeout)
             .user_agent(USER_AGENT)
             .http2_adaptive_window(true)
+            .pool_max_idle_per_host(0)
+            .pool_idle_timeout(None)
             .build()
             .expect("Failed to build HTTP client");
 
         Arc::new(Client {
-            config,
-            cache: RwLock::new(IpUpdate { v4: None, v6: None }),
+            cache: Cache::new(&config.cache_path),
             request,
             shutdown: CancellationToken::new(),
+            config,
         })
     }
 
@@ -109,7 +112,7 @@ impl Client {
             IpVersion::V6 => &self.config.http_ipv6,
         };
         for url in urls {
-            let response = reqwest::get(url.as_str()).await?;
+            let response = self.request.get(url.as_str()).send().await?;
             if let Ok(ip) = response.text().await {
                 if let Ok(ip) = ip.trim().parse() {
                     return Ok(ip);
@@ -166,12 +169,17 @@ impl Client {
                             error!("Failed to fetch IP address, skipping update...");
                             continue;
                         }
+
                         debug!("Found IP(s): {update}");
-                        if update == *self.cache.read().await {
-                            debug!("No IP address change detected, skipping update...");
-                            continue;
+                        match self.cache.get().await {
+                            Ok(Some(cached)) if update == cached => {
+                                debug!("No IP address cache change detected, skipping update...");
+                                continue;
+                            }
+                            Ok(None) => debug!("No cached IP found, updating with IP(s): {update}"),
+                            Ok(Some(_)) => debug!("Cached IP change detected, updating with IP(s): {update}"),
+                            Err(e) => warn!("Failed to read cache: {}, updating with IP(s): {update}", e),
                         }
-                        info!("IP address update detected, updating with IP(s): {update}");
 
                         if self.config.dry_run {
                             info!("Dry run mode enabled, skipping update...");
@@ -203,8 +211,9 @@ impl Client {
                         }
                         if !failed {
                             info!("All providers updated successfully");
-                            let mut cache = self.cache.write().await;
-                            *cache = update;
+                            if let Err(e) = self.cache.set(update).await {
+                                warn!("Failed to update cache: {}", e);
+                            }
                         }
                     }
                 }

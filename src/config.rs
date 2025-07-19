@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use compact_str::CompactString;
 use serde::Deserialize;
 use smallvec::{SmallVec, smallvec};
 
@@ -24,6 +25,8 @@ pub struct Config {
     /// Request connect timeout
     #[serde(with = "humantime_serde")]
     pub connect_timeout: Duration,
+    /// File path to cache file
+    pub cache_path: CompactString,
     /// HTTP servers for IPv4 address checks
     pub http_ipv4: SmallVec<[String; 3]>,
     /// HTTP servers for IPv6 address checks
@@ -41,6 +44,7 @@ impl Default for Config {
             dry_run: false,
             timeout: Duration::from_secs(10),
             connect_timeout: Duration::from_secs(5),
+            cache_path: "/var/cache/ddrs/ddrs.bin".into(),
             http_ipv4: smallvec![
                 String::from("https://api.ipify.org"),
                 String::from("https://ipv4.seeip.org"),
