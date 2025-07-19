@@ -118,7 +118,6 @@ impl Client {
 
     /// Starts the client
     pub fn run(self: Arc<Self>) -> JoinHandle<Result<()>> {
-        dbg!(USER_AGENT);
         tokio::spawn(async move {
             let mut interval = time::interval(self.config.interval);
             info!(
