@@ -4,17 +4,18 @@ use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use compact_str::CompactString;
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use secrecy::{ExposeSecret, SecretString};
+use serde::Deserialize;
 use serde_json::json;
 use smallvec::SmallVec;
 
 use crate::client::{IpUpdate, IpVersion, Provider};
 
 /// Cloudflare DNS update provider
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct Cloudflare {
     zone: CompactString,
-    api_token: String,
+    api_token: SecretString,
     domains: SmallVec<[Domain; 2]>,
     #[serde(default = "default_api_url")]
     api_url: String,
@@ -24,7 +25,7 @@ fn default_api_url() -> String {
     "https://api.cloudflare.com/client/v4".to_string()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 struct Domain {
     name: CompactString,
@@ -80,7 +81,7 @@ impl Cloudflare {
         let zones = request
             .get(format!("{}/zones", self.api_url))
             .query(&[("name", &self.zone)])
-            .bearer_auth(&self.api_token)
+            .bearer_auth(self.api_token.expose_secret())
             .send()
             .await?
             .json::<ZoneList>()
@@ -106,7 +107,7 @@ impl Cloudflare {
             .get(format!("{}/zones/{}/dns_records", self.api_url, zone_id))
             .query(&[("name", &domain.name)])
             .query(&[("type", record_type)])
-            .bearer_auth(&self.api_token)
+            .bearer_auth(self.api_token.expose_secret())
             .send()
             .await?
             .json::<RecordsList>()
@@ -139,7 +140,7 @@ impl Cloudflare {
                 "proxied": domain.proxied,
                 "comment": domain.comment,
             }))
-            .bearer_auth(&self.api_token)
+            .bearer_auth(self.api_token.expose_secret())
             .send()
             .await?
             .json::<UpdatedResult>()
@@ -171,7 +172,7 @@ impl Cloudflare {
                 "proxied": domain.proxied,
                 "comment": domain.comment,
             }))
-            .bearer_auth(&self.api_token)
+            .bearer_auth(self.api_token.expose_secret())
             .send()
             .await?
             .json::<CreatedResult>()
@@ -187,7 +188,7 @@ impl Cloudflare {
 }
 
 #[async_trait]
-#[typetag::serde(name = "cloudflare")]
+#[typetag::deserialize(name = "cloudflare")]
 impl Provider for Cloudflare {
     async fn update(&self, update: IpUpdate, request: Client) -> Result<bool> {
         let zone_id = self.fetch_zone_id(&request).await?;
@@ -252,7 +253,7 @@ mod tests {
 
         let provider = Cloudflare {
             zone: "example.com".into(),
-            api_token: "bad_token".to_string(),
+            api_token: "bad_token".into(),
             domains: smallvec![Domain {
                 name: "example.com".into(),
                 ttl: 1,
@@ -264,7 +265,7 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/zones"))
-            .and(bearer_token(&provider.api_token))
+            .and(bearer_token(provider.api_token.expose_secret()))
             .and(query_param("name", &*provider.zone))
             .respond_with(ResponseTemplate::new(403).set_body_json(json!({
                 "success": false,
@@ -296,7 +297,7 @@ mod tests {
 
         let provider = Cloudflare {
             zone: "example.com".into(),
-            api_token: "token".to_string(),
+            api_token: "token".into(),
             domains: smallvec![Domain {
                 name: "example.com".into(),
                 ttl: 1,
@@ -308,7 +309,7 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/zones"))
-            .and(bearer_token(&provider.api_token))
+            .and(bearer_token(provider.api_token.expose_secret()))
             .and(query_param("name", &*provider.zone))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "success": true,
@@ -335,14 +336,14 @@ mod tests {
 
         let provider = Cloudflare {
             zone: "example.com".into(),
-            api_token: "token".to_string(),
+            api_token: "token".into(),
             domains: smallvec![],
             api_url: mock.uri(),
         };
 
         Mock::given(method("GET"))
             .and(path("/zones"))
-            .and(bearer_token(&provider.api_token))
+            .and(bearer_token(provider.api_token.expose_secret()))
             .and(query_param("name", &*provider.zone))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
               "errors": [],
@@ -371,7 +372,7 @@ mod tests {
 
         let provider = Cloudflare {
             zone: "example.com".into(),
-            api_token: "token".to_string(),
+            api_token: "token".into(),
             domains: smallvec![Domain {
                 name: "example.com".into(),
                 ttl: 1,
@@ -383,7 +384,7 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/zones"))
-            .and(bearer_token(&provider.api_token))
+            .and(bearer_token(provider.api_token.expose_secret()))
             .and(query_param("name", &*provider.zone))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
               "errors": [],
@@ -401,7 +402,7 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path(format!("/zones/{zone_id}/dns_records")))
-            .and(bearer_token(&provider.api_token))
+            .and(bearer_token(provider.api_token.expose_secret()))
             .and(query_param("name", &*provider.domains[0].name))
             .and(query_param("type", "A"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
@@ -425,7 +426,7 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path(format!("/zones/{zone_id}/dns_records")))
-            .and(bearer_token(&provider.api_token))
+            .and(bearer_token(provider.api_token.expose_secret()))
             .and(query_param("name", &*provider.domains[0].name))
             .and(query_param("type", "AAAA"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
@@ -449,7 +450,7 @@ mod tests {
 
         Mock::given(method("PUT"))
             .and(path(format!("/zones/{zone_id}/dns_records/{v4_record_id}")))
-            .and(bearer_token(&provider.api_token))
+            .and(bearer_token(provider.api_token.expose_secret()))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "errors": [],
                 "messages": [],
@@ -460,7 +461,7 @@ mod tests {
 
         Mock::given(method("PUT"))
             .and(path(format!("/zones/{zone_id}/dns_records/{v6_record_id}")))
-            .and(bearer_token(&provider.api_token))
+            .and(bearer_token(provider.api_token.expose_secret()))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "errors": [],
                 "messages": [],
@@ -481,7 +482,7 @@ mod tests {
 
         let provider = Cloudflare {
             zone: "example.com".into(),
-            api_token: "token".to_string(),
+            api_token: "token".into(),
             domains: smallvec![Domain {
                 name: "example.com".into(),
                 ttl: 1,
@@ -493,7 +494,7 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/zones"))
-            .and(bearer_token(&provider.api_token))
+            .and(bearer_token(provider.api_token.expose_secret()))
             .and(query_param("name", &*provider.zone))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
               "errors": [],
@@ -511,7 +512,7 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path(format!("/zones/{zone_id}/dns_records")))
-            .and(bearer_token(&provider.api_token))
+            .and(bearer_token(provider.api_token.expose_secret()))
             .and(query_param("name", &*provider.domains[0].name))
             .and(query_param("type", "A"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
@@ -536,7 +537,7 @@ mod tests {
 
         Mock::given(method("PUT"))
             .and(path(format!("/zones/{zone_id}/dns_records/{v4_record_id}")))
-            .and(bearer_token(&provider.api_token))
+            .and(bearer_token(provider.api_token.expose_secret()))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "errors": [],
                 "messages": [],
@@ -558,7 +559,7 @@ mod tests {
 
         let provider = Cloudflare {
             zone: "example.com".into(),
-            api_token: "token".to_string(),
+            api_token: "token".into(),
             domains: smallvec![Domain {
                 name: "example.com".into(),
                 ttl: 1,
@@ -570,7 +571,7 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/zones"))
-            .and(bearer_token(&provider.api_token))
+            .and(bearer_token(provider.api_token.expose_secret()))
             .and(query_param("name", &*provider.zone))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
               "errors": [],
@@ -590,7 +591,7 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path(format!("/zones/{zone_id}/dns_records")))
-            .and(bearer_token(&provider.api_token))
+            .and(bearer_token(provider.api_token.expose_secret()))
             .and(query_param("name", &*provider.domains[0].name))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
               "errors": [],
@@ -615,7 +616,7 @@ mod tests {
 
         Mock::given(method("PUT"))
             .and(path(format!("/zones/{zone_id}/dns_records/{v6_record_id}")))
-            .and(bearer_token(&provider.api_token))
+            .and(bearer_token(provider.api_token.expose_secret()))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "errors": [],
                 "messages": [],
@@ -637,7 +638,7 @@ mod tests {
 
         let provider = Cloudflare {
             zone: "example.com".into(),
-            api_token: "token".to_string(),
+            api_token: "token".into(),
             domains: smallvec![Domain {
                 name: "example.com".into(),
                 ttl: 1,
@@ -649,7 +650,7 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/zones"))
-            .and(bearer_token(&provider.api_token))
+            .and(bearer_token(provider.api_token.expose_secret()))
             .and(query_param("name", &*provider.zone))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
               "errors": [],
@@ -667,7 +668,7 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path(format!("/zones/{zone_id}/dns_records")))
-            .and(bearer_token(&provider.api_token))
+            .and(bearer_token(provider.api_token.expose_secret()))
             .and(query_param("name", &*provider.domains[0].name))
             .and(query_param("type", "A"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
@@ -681,7 +682,7 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path(format!("/zones/{zone_id}/dns_records")))
-            .and(bearer_token(&provider.api_token))
+            .and(bearer_token(provider.api_token.expose_secret()))
             .and(query_param("name", &*provider.domains[0].name))
             .and(query_param("type", "AAAA"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
@@ -695,7 +696,7 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path(format!("/zones/{zone_id}/dns_records")))
-            .and(bearer_token(&provider.api_token))
+            .and(bearer_token(provider.api_token.expose_secret()))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "errors": [],
                 "messages": [],
@@ -706,7 +707,7 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path(format!("/zones/{zone_id}/dns_records")))
-            .and(bearer_token(&provider.api_token))
+            .and(bearer_token(provider.api_token.expose_secret()))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "errors": [],
                 "messages": [],
@@ -727,7 +728,7 @@ mod tests {
 
         let provider = Cloudflare {
             zone: "example.com".into(),
-            api_token: "token".to_string(),
+            api_token: "token".into(),
             domains: smallvec![Domain {
                 name: "example.com".into(),
                 ttl: 1,
@@ -739,7 +740,7 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/zones"))
-            .and(bearer_token(&provider.api_token))
+            .and(bearer_token(provider.api_token.expose_secret()))
             .and(query_param("name", &*provider.zone))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
               "errors": [],
@@ -757,7 +758,7 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path(format!("/zones/{zone_id}/dns_records")))
-            .and(bearer_token(&provider.api_token))
+            .and(bearer_token(provider.api_token.expose_secret()))
             .and(query_param("name", &*provider.domains[0].name))
             .and(query_param("type", "A"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
@@ -781,7 +782,7 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path(format!("/zones/{zone_id}/dns_records")))
-            .and(bearer_token(&provider.api_token))
+            .and(bearer_token(provider.api_token.expose_secret()))
             .and(query_param("name", &*provider.domains[0].name))
             .and(query_param("type", "AAAA"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
@@ -795,7 +796,7 @@ mod tests {
 
         Mock::given(method("PUT"))
             .and(path(format!("/zones/{zone_id}/dns_records/{v4_record_id}")))
-            .and(bearer_token(&provider.api_token))
+            .and(bearer_token(provider.api_token.expose_secret()))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "errors": [],
                 "messages": [],
@@ -807,7 +808,7 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path(format!("/zones/{zone_id}/dns_records")))
-            .and(bearer_token(&provider.api_token))
+            .and(bearer_token(provider.api_token.expose_secret()))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "errors": [],
                 "messages": [],
