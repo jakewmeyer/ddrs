@@ -121,8 +121,8 @@ services:
 
 ### Systemd
 * Save the binary to `/usr/local/bin/ddrs`
-* Save the configuration file to `/etc/ddrs/config.toml`
 * Create the ddrs user: `sudo useradd --system --no-create-home --shell /bin/false ddrs`
+* Save the configuration file to `/etc/ddrs/config.toml` owned by the `ddrs` user
 * Create a systemd service file at `/etc/systemd/system/ddrs.service`
 * Reload systemd with `sudo systemctl daemon-reload`
 * Start the service with `sudo systemctl start ddrs`

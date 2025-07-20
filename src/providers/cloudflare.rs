@@ -2,6 +2,7 @@ use std::net::IpAddr;
 
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use compact_str::CompactString;
 use reqwest::Client;
 use secrecy::{ExposeSecret, SecretString};
@@ -43,7 +44,8 @@ fn default_ttl() -> u32 {
 }
 
 fn default_comment() -> CompactString {
-    "Created by DDRS".into()
+    let now: DateTime<Utc> = Utc::now();
+    format!("Updated by DDRS @ {}", now.format("%Y-%m-%d %H:%M:%S UTC")).into()
 }
 
 #[derive(Debug, Deserialize)]
