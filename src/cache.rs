@@ -1,5 +1,5 @@
-use std::{fmt::Debug, io::ErrorKind};
 use std::path::PathBuf;
+use std::{fmt::Debug, io::ErrorKind};
 
 use anyhow::Result;
 use bincode::{Decode, Encode};
