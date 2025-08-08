@@ -1,6 +1,8 @@
-FROM rust:1.88.0-alpine AS base
-RUN apk add musl-dev musl-utils
+FROM rust:1.89.0-alpine AS base
+RUN apk add musl-dev musl-utils ca-certificates
+RUN update-ca-certificates
 RUN cargo install cargo-chef
+RUN rustup target add x86_64-unknown-linux-musl
 
 FROM base AS chef
 COPY . .

@@ -72,7 +72,7 @@ type = "http"
   * `name` - The full domain name to update (Required)
   * `ttl` - The TTL for the record, default is `1` (Auto)
   * `proxied` - Whether the record is proxied through Cloudflare, default is `false`
-  * `comment` - A comment to add to the record, default is `Created by DDRS`
+  * `comment` - A comment to add to the record, default is `Updated by DDRS @ <UTC timestamp>`
 
 ```toml
 [[providers]]
