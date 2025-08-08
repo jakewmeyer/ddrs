@@ -361,7 +361,10 @@ mod tests {
             .mount(&mock)
             .await;
 
-        let result = provider.update(UPDATE_BOTH, HttpClient::new()).await.unwrap();
+        let result = provider
+            .update(UPDATE_BOTH, HttpClient::new())
+            .await
+            .unwrap();
         assert!(result);
     }
 
@@ -472,7 +475,10 @@ mod tests {
             .mount(&mock)
             .await;
 
-        let result = provider.update(UPDATE_BOTH, HttpClient::new()).await.unwrap();
+        let result = provider
+            .update(UPDATE_BOTH, HttpClient::new())
+            .await
+            .unwrap();
         assert!(result);
     }
 
@@ -718,7 +724,10 @@ mod tests {
             .mount(&mock)
             .await;
 
-        let result = provider.update(UPDATE_BOTH, HttpClient::new()).await.unwrap();
+        let result = provider
+            .update(UPDATE_BOTH, HttpClient::new())
+            .await
+            .unwrap();
         assert!(result);
     }
 
@@ -820,7 +829,10 @@ mod tests {
             .mount(&mock)
             .await;
 
-        let result = provider.update(UPDATE_BOTH, HttpClient::new()).await.unwrap();
+        let result = provider
+            .update(UPDATE_BOTH, HttpClient::new())
+            .await
+            .unwrap();
         assert!(result);
     }
 }
