@@ -92,8 +92,6 @@ impl Client {
             .connect_timeout(config.connect_timeout)
             .user_agent(USER_AGENT)
             .http2_adaptive_window(true)
-            .pool_max_idle_per_host(0)
-            .pool_idle_timeout(None)
             .build()
             .expect("Failed to build HTTP client");
 
@@ -111,15 +109,28 @@ impl Client {
             IpVersion::V4 => &self.config.http_ipv4,
             IpVersion::V6 => &self.config.http_ipv6,
         };
+        let mut last_err: Option<anyhow::Error> = None;
         for url in urls {
-            let response = self.request.get(url.as_str()).send().await?;
-            if let Ok(ip) = response.text().await {
-                if let Ok(ip) = ip.trim().parse() {
-                    return Ok(ip);
+            match self.request.get(url.as_str()).send().await {
+                Ok(resp) => match resp.text().await {
+                    Ok(body) => {
+                        if let Ok(ip) = body.trim().parse() {
+                            return Ok(ip);
+                        }
+                        debug!("Failed to parse IP from {}", url);
+                    }
+                    Err(e) => {
+                        debug!("Failed to read body from {}: {}", url, e);
+                        last_err = Some(e.into());
+                    }
+                },
+                Err(e) => {
+                    debug!("HTTP request failed for {}: {}", url, e);
+                    last_err = Some(e.into());
                 }
             }
         }
-        Err(anyhow!("Failed to fetch IP address from HTTP"))
+        Err(last_err.unwrap_or_else(|| anyhow!("Failed to fetch IP address from HTTP")))
     }
 
     /// Starts the client
