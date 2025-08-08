@@ -31,6 +31,7 @@ impl Cache {
         let buff = bincode::encode_to_vec(item, bincode::config::standard())?;
         file.write_all(&buff).await?;
         file.flush().await?;
+        file.sync_all().await?;
         Ok(())
     }
 
