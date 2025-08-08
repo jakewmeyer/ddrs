@@ -368,7 +368,6 @@ mod tests {
         assert!(result);
     }
 
-
     #[allow(clippy::too_many_lines)]
     #[tokio::test]
     async fn test_cloudflare_update_both() {
