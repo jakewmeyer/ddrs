@@ -4,7 +4,7 @@ use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use compact_str::CompactString;
-use reqwest::Client;
+use reqwest::Client as HttpClient;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use serde_json::json;
@@ -79,7 +79,7 @@ struct CreatedResult {
 }
 
 impl Cloudflare {
-    async fn fetch_zone_id(&self, request: &Client) -> Result<String> {
+    async fn fetch_zone_id(&self, request: &HttpClient) -> Result<String> {
         let zones = request
             .get(format!("{}/zones", self.api_url))
             .query(&[("name", &self.zone)])
@@ -100,7 +100,7 @@ impl Cloudflare {
 
     async fn fetch_dns_records(
         &self,
-        request: &Client,
+        request: &HttpClient,
         zone_id: &str,
         record_type: &str,
         domain: &Domain,
@@ -122,7 +122,7 @@ impl Cloudflare {
 
     async fn update_dns_record(
         &self,
-        request: &Client,
+        request: &HttpClient,
         zone_id: &str,
         record_id: &str,
         record_type: &str,
@@ -158,7 +158,7 @@ impl Cloudflare {
 
     async fn create_dns_record(
         &self,
-        request: &Client,
+        request: &HttpClient,
         zone_id: &str,
         record_type: &str,
         domain: &Domain,
@@ -192,7 +192,7 @@ impl Cloudflare {
 #[async_trait]
 #[typetag::deserialize(name = "cloudflare")]
 impl Provider for Cloudflare {
-    async fn update(&self, update: IpUpdate, request: Client) -> Result<bool> {
+    async fn update(&self, update: IpUpdate, request: HttpClient) -> Result<bool> {
         let zone_id = self.fetch_zone_id(&request).await?;
         for domain in &self.domains {
             for (version, addr) in update.iter() {
@@ -284,7 +284,7 @@ mod tests {
             .await;
 
         let error = provider
-            .update(UPDATE_BOTH, Client::new())
+            .update(UPDATE_BOTH, HttpClient::new())
             .await
             .unwrap_err();
         assert_eq!(
@@ -323,7 +323,7 @@ mod tests {
             .await;
 
         let error = provider
-            .update(UPDATE_BOTH, Client::new())
+            .update(UPDATE_BOTH, HttpClient::new())
             .await
             .unwrap_err();
         assert_eq!(
@@ -361,7 +361,7 @@ mod tests {
             .mount(&mock)
             .await;
 
-        let result = provider.update(UPDATE_BOTH, Client::new()).await.unwrap();
+        let result = provider.update(UPDATE_BOTH, HttpClient::new()).await.unwrap();
         assert!(result);
     }
 
@@ -472,7 +472,7 @@ mod tests {
             .mount(&mock)
             .await;
 
-        let result = provider.update(UPDATE_BOTH, Client::new()).await.unwrap();
+        let result = provider.update(UPDATE_BOTH, HttpClient::new()).await.unwrap();
         assert!(result);
     }
 
@@ -549,7 +549,7 @@ mod tests {
             .mount(&mock)
             .await;
 
-        let result = provider.update(UPDATE_V4, Client::new()).await.unwrap();
+        let result = provider.update(UPDATE_V4, HttpClient::new()).await.unwrap();
         assert!(result);
     }
 
@@ -629,7 +629,7 @@ mod tests {
             .mount(&mock)
             .await;
 
-        let result = provider.update(UPDATE_V6, Client::new()).await.unwrap();
+        let result = provider.update(UPDATE_V6, HttpClient::new()).await.unwrap();
         assert!(result);
     }
 
@@ -718,7 +718,7 @@ mod tests {
             .mount(&mock)
             .await;
 
-        let result = provider.update(UPDATE_BOTH, Client::new()).await.unwrap();
+        let result = provider.update(UPDATE_BOTH, HttpClient::new()).await.unwrap();
         assert!(result);
     }
 
@@ -820,7 +820,7 @@ mod tests {
             .mount(&mock)
             .await;
 
-        let result = provider.update(UPDATE_BOTH, Client::new()).await.unwrap();
+        let result = provider.update(UPDATE_BOTH, HttpClient::new()).await.unwrap();
         assert!(result);
     }
 }
