@@ -44,7 +44,7 @@ impl Default for Config {
             dry_run: false,
             timeout: Duration::from_secs(10),
             connect_timeout: Duration::from_secs(5),
-            cache_path: "/var/cache/ddrs/ddrs.bin".into(),
+            cache_path: "/var/cache/ddrs".into(),
             http_ipv4: smallvec![
                 String::from("https://api.ipify.org"),
                 String::from("https://ipv4.seeip.org"),

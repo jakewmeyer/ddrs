@@ -7,6 +7,13 @@
 * Support for IPv4, IPv6, or dual-stack
 * File based cache for most recent update
 
+## Supported DNS Providers
+- [x] Cloudflare
+- [ ] Dynu
+- [ ] No-IP
+- [ ] DuckDNS
+- [ ] FreeDNS
+
 ## Config
 The configuration file is in [TOML](https://toml.io/en/) format. The default location for the configuration file is `/etc/ddrs/config.toml`. A custom location can be specified with the `--config` flag.
 
@@ -15,7 +22,7 @@ The configuration file is in [TOML](https://toml.io/en/) format. The default loc
 * `interval` - Interval to run the update loop (default: `30s`)
 * `timeout` - Total request timeout for HTTP requests (default: `10s`)
 * `connect_timeout` - Connect timeout for HTTP requests (default: `5s`)
-* `cache_path` - Path to the cache file for storing last known IP update (default: `/var/cache/ddrs/ddrs.bin`)
+* `cache_path` - Path to the cache file for storing last known IP update (default: `/var/cache/ddrs/cache.ddrs`)
 * `dry_run` - Fetch the IP address but do not update the DNS records
 * `http_ipv4` - A list of HTTP(S) URLs to use for IPv4 lookups
 * `http_ipv6` - A list of HTTP(S) URLs to use for IPv6 lookups

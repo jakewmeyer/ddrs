@@ -1,11 +1,10 @@
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
-use bincode::{Decode, Encode};
 use core::fmt;
 use dyn_clone::DynClone;
 use local_ip_address::list_afinet_netifas;
 use reqwest::Client as HttpClient;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display, Formatter};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
@@ -42,7 +41,7 @@ pub enum IpSource {
 }
 
 /// Update sent to each provider
-#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IpUpdate {
     pub v4: Option<Ipv4Addr>,
     pub v6: Option<Ipv6Addr>,
