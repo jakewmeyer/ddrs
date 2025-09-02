@@ -15,7 +15,7 @@ readme = "README.md"
 anyhow = "1.0.99"
 async-trait = "0.1.89"
 chrono = "0.4.41"
-clap = { version = "4.5.46", features = ["derive"] }
+clap = { version = "4.5.47", features = ["derive"] }
 compact_str = { version = "0.9.0", features = ["serde"] }
 crc32fast = "1.5.0"
 dyn-clone = "1.0.20"

@@ -113,17 +113,18 @@ impl Cache {
         let std_file = named_file.reopen()?;
         let mut file = File::from_std(std_file);
 
-        // Build header + payload buffer
-        let mut buf: Vec<u8> = Vec::new();
+        // Serialize data first to allocate once
+        let mut data: Vec<u8> = Vec::new();
+        item.serialize(&mut Serializer::new(&mut data).with_struct_map())?;
+        let data_length = u32::try_from(data.len())?;
+
+        // Build header
+        let buf_size = HEADER_SIZE + data.len() + std::mem::size_of::<u32>();
+        let mut buf: Vec<u8> = Vec::with_capacity(buf_size);
         buf.extend_from_slice(MAGIC_IDENTIFIER);
         buf.extend_from_slice(&VERSION.to_be_bytes());
         buf.extend_from_slice(&FLAGS.to_be_bytes());
-
-        let mut data: Vec<u8> = Vec::new();
-        item.serialize(&mut Serializer::new(&mut data).with_struct_map())?;
-
-        let length = u32::try_from(data.len())?;
-        buf.extend_from_slice(&length.to_be_bytes());
+        buf.extend_from_slice(&data_length.to_be_bytes());
 
         // Write header checksum
         let mut hasher = Hasher::new();
