@@ -3,7 +3,10 @@ use async_trait::async_trait;
 use core::fmt;
 use dyn_clone::DynClone;
 use local_ip_address::list_afinet_netifas;
-use reqwest::Client as HttpClient;
+use reqwest::Client as InnerHttpClient;
+use reqwest_middleware::{ClientBuilder, ClientWithMiddleware as HttpClient};
+use reqwest_retry::RetryTransientMiddleware;
+use reqwest_retry::policies::ExponentialBackoff;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display, Formatter};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -86,14 +89,17 @@ pub struct Client {
 
 impl Client {
     pub fn new(config: Config) -> Arc<Client> {
-        let request = HttpClient::builder()
+        let client = InnerHttpClient::builder()
             .timeout(config.timeout)
             .connect_timeout(config.connect_timeout)
             .user_agent(USER_AGENT)
             .http2_adaptive_window(true)
             .build()
             .expect("Failed to build HTTP client");
-
+        let retry_policy = ExponentialBackoff::builder().build_with_max_retries(config.retries);
+        let request = ClientBuilder::new(client)
+            .with(RetryTransientMiddleware::new_with_policy(retry_policy))
+            .build();
         Arc::new(Client {
             cache: Cache::new(&config.cache_path),
             request,

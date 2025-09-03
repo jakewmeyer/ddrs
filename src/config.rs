@@ -27,6 +27,8 @@ pub struct Config {
     pub connect_timeout: Duration,
     /// File path to cache file
     pub cache_path: CompactString,
+    /// HTTP request max retries
+    pub retries: u32,
     /// HTTP servers for IPv4 address checks
     pub http_ipv4: SmallVec<[String; 3]>,
     /// HTTP servers for IPv6 address checks
@@ -45,6 +47,7 @@ impl Default for Config {
             timeout: Duration::from_secs(10),
             connect_timeout: Duration::from_secs(5),
             cache_path: "/var/cache/ddrs".into(),
+            retries: 1,
             http_ipv4: smallvec![
                 String::from("https://api.ipify.org"),
                 String::from("https://ipv4.seeip.org"),

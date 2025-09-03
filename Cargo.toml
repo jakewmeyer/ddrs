@@ -29,6 +29,8 @@ reqwest = { version = "0.12.23", features = [
   "brotli",
   "rustls-tls",
 ], default-features = false }
+reqwest-middleware = { version = "0.4.2", features = ["charset", "http2", "json", "rustls-tls"] }
+reqwest-retry = "0.7.0"
 rmp-serde = "1.3.0"
 secrecy = { version = "0.10.3", features = ["serde"] }
 serde = { version = "1.0.219", features = ["derive", "serde_derive"] }

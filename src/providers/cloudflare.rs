@@ -4,7 +4,7 @@ use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use compact_str::CompactString;
-use reqwest::Client as HttpClient;
+use reqwest_middleware::ClientWithMiddleware as HttpClient;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use serde_json::json;
@@ -228,6 +228,8 @@ impl Provider for Cloudflare {
 mod tests {
     use std::net::{Ipv4Addr, Ipv6Addr};
 
+    use reqwest::Client as InnerHttpClient;
+    use reqwest_middleware::ClientBuilder;
     use smallvec::smallvec;
     use wiremock::{
         Mock, MockServer, ResponseTemplate,
@@ -252,6 +254,7 @@ mod tests {
     #[tokio::test]
     async fn test_cloudflare_bad_token() {
         let mock = MockServer::start().await;
+        let http: HttpClient = ClientBuilder::new(InnerHttpClient::new()).build();
 
         let provider = Cloudflare {
             zone: "example.com".into(),
@@ -283,10 +286,7 @@ mod tests {
             .mount(&mock)
             .await;
 
-        let error = provider
-            .update(UPDATE_BOTH, HttpClient::new())
-            .await
-            .unwrap_err();
+        let error = provider.update(UPDATE_BOTH, http).await.unwrap_err();
         assert_eq!(
             error.to_string(),
             "Failed to list Cloudflare zones, is your token valid?"
@@ -296,6 +296,7 @@ mod tests {
     #[tokio::test]
     async fn test_cloudflare_no_matching_zones() {
         let mock = MockServer::start().await;
+        let http: HttpClient = ClientBuilder::new(InnerHttpClient::new()).build();
 
         let provider = Cloudflare {
             zone: "example.com".into(),
@@ -322,10 +323,7 @@ mod tests {
             .mount(&mock)
             .await;
 
-        let error = provider
-            .update(UPDATE_BOTH, HttpClient::new())
-            .await
-            .unwrap_err();
+        let error = provider.update(UPDATE_BOTH, http).await.unwrap_err();
         assert_eq!(
             error.to_string(),
             "Failed to find a matching Cloudflare zone"
@@ -335,6 +333,7 @@ mod tests {
     #[tokio::test]
     async fn test_cloudflare_no_domains() {
         let mock = MockServer::start().await;
+        let http: HttpClient = ClientBuilder::new(InnerHttpClient::new()).build();
 
         let provider = Cloudflare {
             zone: "example.com".into(),
@@ -361,10 +360,7 @@ mod tests {
             .mount(&mock)
             .await;
 
-        let result = provider
-            .update(UPDATE_BOTH, HttpClient::new())
-            .await
-            .unwrap();
+        let result = provider.update(UPDATE_BOTH, http).await.unwrap();
         assert!(result);
     }
 
@@ -372,6 +368,7 @@ mod tests {
     #[tokio::test]
     async fn test_cloudflare_update_both() {
         let mock = MockServer::start().await;
+        let http: HttpClient = ClientBuilder::new(InnerHttpClient::new()).build();
         let zone_id = "023e105f4ecef8ad9ca31a8372d0c353";
         let v4_record_id = "89c0cbe7d4554cd29120ed30d8e6ef17";
         let v6_record_id = "25f1b0da807484b9668f812480f5c734";
@@ -476,16 +473,14 @@ mod tests {
             .mount(&mock)
             .await;
 
-        let result = provider
-            .update(UPDATE_BOTH, HttpClient::new())
-            .await
-            .unwrap();
+        let result = provider.update(UPDATE_BOTH, http).await.unwrap();
         assert!(result);
     }
 
     #[tokio::test]
     async fn test_cloudflare_update_ipv4() {
         let mock = MockServer::start().await;
+        let http: HttpClient = ClientBuilder::new(InnerHttpClient::new()).build();
         let zone_id = "023e105f4ecef8ad9ca31a8372d0c353";
         let v4_record_id = "89c0cbe7d4554cd29120ed30d8e6ef17";
 
@@ -556,13 +551,14 @@ mod tests {
             .mount(&mock)
             .await;
 
-        let result = provider.update(UPDATE_V4, HttpClient::new()).await.unwrap();
+        let result = provider.update(UPDATE_V4, http).await.unwrap();
         assert!(result);
     }
 
     #[tokio::test]
     async fn test_cloudflare_update_v6() {
         let mock = MockServer::start().await;
+        let http: HttpClient = ClientBuilder::new(InnerHttpClient::new()).build();
         let zone_id = "023e105f4ecef8ad9ca31a8372d0c353";
         let v6_record_id = "25f1b0da807484b9668f812480f5c734";
 
@@ -636,13 +632,14 @@ mod tests {
             .mount(&mock)
             .await;
 
-        let result = provider.update(UPDATE_V6, HttpClient::new()).await.unwrap();
+        let result = provider.update(UPDATE_V6, http).await.unwrap();
         assert!(result);
     }
 
     #[tokio::test]
     async fn test_cloudflare_create_both() {
         let mock = MockServer::start().await;
+        let http: HttpClient = ClientBuilder::new(InnerHttpClient::new()).build();
         let zone_id = "023e105f4ecef8ad9ca31a8372d0c353";
 
         let provider = Cloudflare {
@@ -725,16 +722,14 @@ mod tests {
             .mount(&mock)
             .await;
 
-        let result = provider
-            .update(UPDATE_BOTH, HttpClient::new())
-            .await
-            .unwrap();
+        let result = provider.update(UPDATE_BOTH, http).await.unwrap();
         assert!(result);
     }
 
     #[tokio::test]
     async fn test_cloudflare_create_v4_update_v6() {
         let mock = MockServer::start().await;
+        let http: HttpClient = ClientBuilder::new(InnerHttpClient::new()).build();
         let zone_id = "023e105f4ecef8ad9ca31a8372d0c353";
         let v4_record_id = "89c0cbe7d4554cd29120ed30d8e6ef17";
 
@@ -830,10 +825,7 @@ mod tests {
             .mount(&mock)
             .await;
 
-        let result = provider
-            .update(UPDATE_BOTH, HttpClient::new())
-            .await
-            .unwrap();
+        let result = provider.update(UPDATE_BOTH, http).await.unwrap();
         assert!(result);
     }
 }
