@@ -1,4 +1,4 @@
-FROM rust:1.89.0-alpine AS base
+FROM rust:1.90.0-alpine AS base
 RUN apk add musl-dev musl-utils ca-certificates
 RUN update-ca-certificates
 RUN cargo install cargo-chef
