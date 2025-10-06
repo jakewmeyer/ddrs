@@ -172,7 +172,7 @@ impl Cache {
         let mut magic: [u8; 4] = [0; 4];
         cursor.read_exact(&mut magic).await?;
         if magic != *MAGIC_IDENTIFIER {
-            return Err(anyhow!("Invalid magic header: {:#?}", magic));
+            return Err(anyhow!("Invalid magic header: {magic:#?}"));
         }
 
         let version = cursor.read_u16().await?;
