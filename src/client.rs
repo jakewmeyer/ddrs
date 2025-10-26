@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display, Formatter};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::task::{JoinHandle, JoinSet};
 use tokio::time;
 use tokio_util::sync::CancellationToken;
@@ -146,6 +147,7 @@ impl Client {
                 "Started DDRS client, checking IP address every {:?}",
                 self.config.interval
             );
+            time::sleep(Duration::from_secs(2)).await;
             loop {
                 tokio::select! {
                     biased;
