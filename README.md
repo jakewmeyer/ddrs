@@ -9,10 +9,13 @@
 
 ## Supported DNS Providers
 - [x] Cloudflare
-- [ ] Dynu
-- [ ] No-IP
+- [x] Porkbun
+- [ ] Namecheap
+- [ ] Gandi
+- [ ] DigitalOcean
+- [ ] Hetzner
 - [ ] DuckDNS
-- [ ] FreeDNS
+- [ ] Hurricane Electric
 
 ## Config
 The configuration file is in [TOML](https://toml.io/en/) format. The default location for the configuration file is `/etc/ddrs/config.toml`. A custom location can be specified with the `--config` flag.
@@ -107,6 +110,38 @@ name = "sub.domain.com"
 ttl = 1
 proxied = false
 comment = "Subdomain"
+```
+
+### Porkbun
+* `type` - The provider type. Must be `porkbun`
+* `api_key` - Porkbun API key
+* `secret_api_key` - Porkbun secret API key
+* `api_url` - Optional API URL, default is `https://api.porkbun.com/api/json/v3`
+* `domains` - A list of domains to update
+  * `name` - The root domain name to update (Required)
+  * `subdomain` - The subdomain to update (Optional)
+  * `ttl` - The TTL for the record, default is `600`
+  * `notes` - A note to add to the record, default is `Updated by DDRS @ <UTC timestamp>`
+
+```toml
+[[providers]]
+type = "porkbun"
+api_key = "API_KEY"
+secret_api_key = "SECRET_API_KEY"
+
+[[providers.domains]]
+name = "domain.com"
+notes = "Root domain"
+
+[[providers.domains]]
+name = "domain.com"
+subdomain = "*"
+notes = "Wildcard subdomain"
+
+[[providers.domains]]
+name = "domain.com"
+subdomain = "sub"
+notes = "Subdomain"
 ```
 
 ## Deployment
