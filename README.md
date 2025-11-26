@@ -74,7 +74,10 @@ type = "http"
 # Provider(s) configuration
 ```
 
-## Providers
+## Provider Config
+
+<details>
+<summary>Cloudflare</summary>
 
 ### Cloudflare
 * `type` - The provider type. Must be `cloudflare`
@@ -111,6 +114,10 @@ ttl = 1
 proxied = false
 comment = "Subdomain"
 ```
+</details>
+
+<details>
+<summary>Porkbun</summary>
 
 ### Porkbun
 * `type` - The provider type. Must be `porkbun`
@@ -143,6 +150,7 @@ name = "domain.com"
 subdomain = "sub"
 notes = "Subdomain"
 ```
+</details>
 
 ## Deployment
 * Logging can be configured with the [RUST_LOG](https://docs.rs/env_logger/latest/env_logger/#enabling-logging) environment variable. By default, the log level is set to `info`. For more verbose logging, set the environment variable to `RUST_LOG=ddrs=debug`.
