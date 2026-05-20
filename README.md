@@ -25,7 +25,7 @@ The configuration file is in [TOML](https://toml.io/en/) format. The default loc
 * `interval` - Interval to run the update loop (default: `30s`)
 * `timeout` - Total request timeout for HTTP requests (default: `10s`)
 * `connect_timeout` - Connect timeout for HTTP requests (default: `5s`)
-* `cache_path` - Path to the cache file for storing last known IP update (default: `/var/cache/ddrs/cache.ddrs`)
+* `cache_path` - Path to the cache directory for storing last known IP update (default: `/var/cache/ddrs`)
 * `retries` - Number of retries for IP lookup and provider requests (default: `1`)
 * `dry_run` - Fetch the IP address but do not update the DNS records
 * `http_ipv4` - A list of HTTP(S) URLs to use for IPv4 lookups
