@@ -157,6 +157,13 @@ impl Cache {
             Err(e) => return Err(e.into()),
         };
 
+        let file_length = file.metadata().await?.len();
+        if file_length < HEADER_SIZE as u64 {
+            return Err(anyhow!(
+                "Cache file is truncated: not long enough for header"
+            ));
+        }
+
         let mut header_buffer = vec![0u8; HEADER_SIZE];
         if let Err(e) = file.read_exact(&mut header_buffer).await {
             if e.kind() == ErrorKind::UnexpectedEof {
@@ -191,6 +198,21 @@ impl Cache {
         if calculated_header_checksum != header_checksum {
             return Err(anyhow!(
                 "Invalid cache file header checksum: Stored: {header_checksum} != Calculated: {calculated_header_checksum}"
+            ));
+        }
+
+        let expected_length =
+            HEADER_SIZE as u64 + data_length as u64 + std::mem::size_of::<u32>() as u64;
+
+        if expected_length > file_length {
+            return Err(anyhow!(
+                "Cache file is truncated: header declares {expected_length} bytes, file is {file_length} bytes"
+            ));
+        }
+
+        if expected_length < file_length {
+            return Err(anyhow!(
+                "Cache file is too large: header declares {expected_length} bytes, file is {file_length} bytes"
             ));
         }
 
@@ -332,7 +354,7 @@ mod tests {
         let err = res.unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Cache file is truncated: could not read complete header"
+            "Cache file is truncated: not long enough for header"
         );
         Ok(())
     }
