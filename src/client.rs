@@ -74,6 +74,8 @@ impl Display for IpUpdate {
 #[async_trait]
 #[typetag::deserialize(tag = "type")]
 pub trait Provider: Debug + DynClone + Send + Sync {
+    fn validate_config(&self) -> Result<()>;
+
     async fn update(&self, update: IpUpdate, request: HttpClient) -> Result<bool>;
 }
 
@@ -119,12 +121,13 @@ impl Client {
         for url in urls {
             match self.request.get(url.as_str()).send().await {
                 Ok(resp) => match resp.text().await {
-                    Ok(body) => {
-                        if let Ok(ip) = body.trim().parse() {
-                            return Ok(ip);
+                    Ok(body) => match parse_ip_for_version(version, &body) {
+                        Ok(ip) => return Ok(ip),
+                        Err(e) => {
+                            debug!("Failed to parse {version:?} IP from {url}: {e}");
+                            last_err = Some(e);
                         }
-                        debug!("Failed to parse IP from {}", url);
-                    }
+                    },
                     Err(e) => {
                         debug!("Failed to read body from {}: {}", url, e);
                         last_err = Some(e.into());
@@ -224,6 +227,7 @@ impl Client {
                                 },
                                 Err(error) => {
                                     error!("Provider task failed to complete: {error}");
+                                    failed = true;
                                 }
                             }
                         }
@@ -269,4 +273,18 @@ fn fetch_ip_interface(interface: &IpSourceInterface, version: &IpVersion) -> Res
         "Failed to find network interface: {}",
         interface.name
     ))
+}
+
+fn parse_ip_for_version(version: &IpVersion, body: &str) -> Result<IpAddr> {
+    let body = body.trim();
+    match version {
+        IpVersion::V4 => body
+            .parse::<Ipv4Addr>()
+            .map(IpAddr::V4)
+            .context("Expected IPv4 address"),
+        IpVersion::V6 => body
+            .parse::<Ipv6Addr>()
+            .map(IpAddr::V6)
+            .context("Expected IPv6 address"),
+    }
 }

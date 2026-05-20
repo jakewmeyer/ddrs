@@ -192,6 +192,13 @@ impl Cloudflare {
 #[async_trait]
 #[typetag::deserialize(name = "cloudflare")]
 impl Provider for Cloudflare {
+    fn validate_config(&self) -> Result<()> {
+        if self.domains.is_empty() {
+            return Err(anyhow!("Cloudflare provider has no domains configured"));
+        }
+        Ok(())
+    }
+
     async fn update(&self, update: IpUpdate, request: HttpClient) -> Result<bool> {
         let zone_id = self.fetch_zone_id(&request).await?;
         for domain in &self.domains {

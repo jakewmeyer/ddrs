@@ -212,6 +212,13 @@ impl Porkbun {
 #[async_trait]
 #[typetag::deserialize(name = "porkbun")]
 impl Provider for Porkbun {
+    fn validate_config(&self) -> Result<()> {
+        if self.domains.is_empty() {
+            return Err(anyhow!("Porkbun provider has no domains configured"));
+        }
+        Ok(())
+    }
+
     async fn update(&self, update: IpUpdate, request: HttpClient) -> Result<bool> {
         for domain in &self.domains {
             for (version, addr) in update.iter() {

@@ -44,6 +44,10 @@ async fn main() -> Result<()> {
         return Err(anyhow!("No providers configured"));
     }
 
+    for provider in &config.providers {
+        provider.validate_config()?;
+    }
+
     let client = Client::new(config);
 
     // Handle SIGINT
