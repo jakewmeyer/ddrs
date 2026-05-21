@@ -187,7 +187,10 @@ impl Cache {
             return Err(anyhow!("Invalid cache file version"));
         }
 
-        let _flags = cursor.read_u16().await?;
+        let flags = cursor.read_u16().await?;
+        if flags != 0 {
+            return Err(anyhow!("Unsupported cache flags: 0x{flags:04x}"));
+        }
 
         let data_length = cursor.read_u32().await?.try_into()?;
 
@@ -420,6 +423,34 @@ mod tests {
         assert!(res.is_err());
         let msg = res.unwrap_err().to_string();
         assert!(msg.contains("Invalid cache file header checksum"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_unsupported_flags() -> Result<()> {
+        let cache = Cache::new(tempdir()?.path());
+        let td = TestData {
+            id: 1,
+            name: "x".into(),
+            active: true,
+        };
+        cache.set(td.clone()).await?;
+
+        let mut bytes = fs::read(&cache.path).await?;
+        bytes[6..8].copy_from_slice(&1u16.to_be_bytes());
+
+        let mut hasher = Hasher::new();
+        hasher.update(&bytes[0..12]);
+        bytes[12..16].copy_from_slice(&hasher.finalize().to_be_bytes());
+
+        fs::write(&cache.path, &bytes).await?;
+
+        let res: Result<Option<TestData>> = cache.get().await;
+        assert!(res.is_err());
+        assert_eq!(
+            res.unwrap_err().to_string(),
+            "Unsupported cache flags: 0x0001"
+        );
         Ok(())
     }
 
