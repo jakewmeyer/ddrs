@@ -1,4 +1,4 @@
-FROM rust:1.95.0-alpine AS base
+FROM rust:1.96.0-alpine AS base
 WORKDIR /app
 RUN apk add --no-cache musl-dev musl-utils ca-certificates
 RUN update-ca-certificates
