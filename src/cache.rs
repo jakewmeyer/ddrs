@@ -57,6 +57,9 @@ const DEFAULT_FILENAME: &str = "cache";
 /// Default file extension for cache files
 const DEFAULT_EXTENSION: &str = "ddrs";
 
+/// Maximum supported data size (1 MiB)
+const MAX_DATA_SIZE: usize = 1024 * 1024;
+
 /// A persistent cache implementation that stores serialized data with integrity protection.
 ///
 /// The cache uses a binary format with checksums to ensure data integrity and
@@ -116,6 +119,12 @@ impl Cache {
         // Serialize data first to allocate once
         let mut data: Vec<u8> = Vec::new();
         item.serialize(&mut Serializer::new(&mut data).with_struct_map())?;
+        if data.len() > MAX_DATA_SIZE {
+            return Err(anyhow!(
+                "Serialized cache payload is too large: {} bytes, maximum is {MAX_DATA_SIZE} bytes",
+                data.len()
+            ));
+        }
         let data_length = u32::try_from(data.len())?;
 
         // Build header
@@ -193,6 +202,11 @@ impl Cache {
         }
 
         let data_length = cursor.read_u32().await?.try_into()?;
+        if data_length > MAX_DATA_SIZE {
+            return Err(anyhow!(
+                "Cache file payload is too large: header declares {data_length} bytes, maximum is {MAX_DATA_SIZE} bytes"
+            ));
+        }
 
         let header_checksum = cursor.read_u32().await?;
         let mut hasher = Hasher::new();
@@ -481,6 +495,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_get_rejects_payload_larger_than_max_data_size() -> Result<()> {
+        let temp = tempdir()?;
+        let cache = Cache::new(temp.path());
+        let data_length = u32::try_from(MAX_DATA_SIZE + 1)?;
+
+        let mut bytes = Vec::with_capacity(HEADER_SIZE);
+        bytes.extend_from_slice(MAGIC_IDENTIFIER);
+        bytes.extend_from_slice(&VERSION.to_be_bytes());
+        bytes.extend_from_slice(&FLAGS.to_be_bytes());
+        bytes.extend_from_slice(&data_length.to_be_bytes());
+
+        let mut hasher = Hasher::new();
+        hasher.update(&bytes);
+        bytes.extend_from_slice(&hasher.finalize().to_be_bytes());
+
+        fs::write(&cache.path, &bytes).await?;
+
+        let res: Result<Option<TestData>> = cache.get().await;
+        assert!(res.is_err());
+        assert_eq!(
+            res.unwrap_err().to_string(),
+            format!(
+                "Cache file payload is too large: header declares {} bytes, maximum is {MAX_DATA_SIZE} bytes",
+                MAX_DATA_SIZE + 1
+            )
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_empty_struct() -> Result<()> {
         let cache = Cache::new(tempdir()?.path());
         let v = Empty {};
@@ -491,17 +535,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_large_payload() -> Result<()> {
-        let cache = Cache::new(tempdir()?.path());
-        let big = "x".repeat(2 * 1024 * 1024); // 2 MiB
+    async fn test_set_rejects_payload_larger_than_max_data_size() -> Result<()> {
+        let temp = tempdir()?;
+        let cache = Cache::new(temp.path());
+        let big = "x".repeat(MAX_DATA_SIZE + 1);
         let td = TestData {
             id: 7,
             name: big,
             active: true,
         };
-        cache.set(td.clone()).await?;
-        let got: Option<TestData> = cache.get().await?;
-        assert_eq!(got, Some(td));
+
+        let res = cache.set(td).await;
+        assert!(res.is_err());
+        let msg = res.unwrap_err().to_string();
+        assert!(msg.starts_with("Serialized cache payload is too large"));
+        assert!(msg.contains(&format!("maximum is {MAX_DATA_SIZE} bytes")));
+        assert!(!cache.path.exists());
         Ok(())
     }
 }
