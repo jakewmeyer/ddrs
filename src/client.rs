@@ -13,7 +13,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::task::{JoinHandle, JoinSet};
-use tokio::time;
+use tokio::time::{self, MissedTickBehavior};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
@@ -147,6 +147,7 @@ impl Client {
     pub fn run(self: Arc<Self>) -> JoinHandle<Result<()>> {
         tokio::spawn(async move {
             let mut interval = time::interval(self.config.interval.get());
+            interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
             info!(
                 "Started DDRS client, checking IP address every {:?}",
                 self.config.interval.get()
