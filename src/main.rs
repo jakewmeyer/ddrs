@@ -34,7 +34,7 @@ async fn main() -> Result<()> {
     let config_path = match args.config {
         Some(path) => Path::new(&path)
             .canonicalize()
-            .context("Failed to canonicalize config arg path")?,
+            .context("failed to canonicalize config arg path")?,
         None => Path::new(CONFIG_PATH).to_path_buf(),
     };
 
@@ -66,11 +66,15 @@ async fn main() -> Result<()> {
     let terminate = std::future::pending();
 
     let graceful = client.clone();
-    let client_handle = client.run();
+    let mut client_handle = client.run();
 
     tokio::select! {
         () = ctrl_c => {},
         () = terminate => {},
+        result = &mut client_handle => {
+            result??;
+            anyhow::bail!("client task exited unexpectedly");
+        }
     }
 
     info!("Starting graceful shutdown...");
