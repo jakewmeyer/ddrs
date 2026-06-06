@@ -8,14 +8,15 @@
 * File based cache for most recent update
 
 ## Supported DNS Providers
-- [x] Cloudflare
-- [x] Porkbun
-- [ ] Namecheap
-- [ ] Gandi
-- [ ] DigitalOcean
-- [ ] Hetzner
-- [ ] DuckDNS
-- [ ] Hurricane Electric
+- [x] [CloudFlare](https://www.cloudflare.com)
+- [x] [Porkbun](https://porkbun.com)
+- [x] [Duck DNS](https://duckdns.org)
+- [ ] [NameCheap](https://www.namecheap.com)
+- [ ] [Gandi](https://www.gandi.net)
+- [ ] [DigitalOcean](https://www.digitalocean.com)
+- [ ] [Hetzner](https://www.hetzner.com)
+- [ ] [deSEC](https://desec.io)
+- [ ] [Hurricane Electric](https://www.hurricane.electric)
 
 ## Config
 The configuration file is in [TOML](https://toml.io/en/) format. The default location for the configuration file is `/etc/ddrs/config.toml`. A custom location can be specified with the `--config` flag.
@@ -149,6 +150,23 @@ notes = "Wildcard subdomain"
 name = "domain.com"
 subdomain = "sub"
 notes = "Subdomain"
+```
+</details>
+
+<details>
+<summary>Duck DNS</summary>
+
+### Duck DNS
+* `type` - The provider type. Must be `duckdns`
+* `token` - Duck DNS account token
+* `api_url` - Optional API URL, default is `https://www.duckdns.org`
+* `domains` - A list of Duck DNS subnames to update, without `.duckdns.org`
+
+```toml
+[[providers]]
+type = "duckdns"
+token = "TOKEN"
+domains = ["domain", "other-domain"]
 ```
 </details>
 
