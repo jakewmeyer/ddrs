@@ -91,25 +91,25 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new(config: Config) -> Arc<Client> {
+    pub fn new(config: Config) -> Result<Arc<Client>> {
         let client = InnerHttpClient::builder()
             .timeout(config.timeout.get())
             .connect_timeout(config.connect_timeout.get())
             .user_agent(USER_AGENT)
             .http2_adaptive_window(true)
             .build()
-            .expect("failed to build HTTP client");
+            .context("failed to build HTTP client")?;
         let retry_policy =
             ExponentialBackoff::builder().build_with_max_retries(config.retries.get());
         let request = ClientBuilder::new(client)
             .with(RetryTransientMiddleware::new_with_policy(retry_policy))
             .build();
-        Arc::new(Client {
+        Ok(Arc::new(Client {
             cache: Cache::new(config.cache_path.clone()),
             request,
             shutdown: CancellationToken::new(),
             config,
-        })
+        }))
     }
 
     /// Fetches the IP address via a HTTP request

@@ -195,6 +195,7 @@ services:
 * Create the ddrs user: `sudo useradd --system --no-create-home --shell /bin/false ddrs`
 * Save the configuration file to `/etc/ddrs/config.toml` owned by the `ddrs` user
 * Create a systemd service file at `/etc/systemd/system/ddrs.service`
+* Ensure the `ddrs` user can read the system CA bundle/certificate directory used by your distribution
 * Reload systemd with `sudo systemctl daemon-reload`
 * Start the service with `sudo systemctl start ddrs`
 * Enable the service with `sudo systemctl enable ddrs`

@@ -44,33 +44,33 @@ async fn main() -> Result<()> {
         provider.validate_config()?;
     }
 
-    let client = Client::new(config);
+    let client = Client::new(config)?;
 
     // Handle SIGINT
     let ctrl_c = async {
         signal::ctrl_c()
             .await
-            .expect("failed to install Ctrl+C handler");
+            .context("failed to listen for Ctrl+C")
     };
 
     // Unix SIGTERM
     #[cfg(unix)]
     let terminate = async {
-        signal::unix::signal(signal::unix::SignalKind::terminate())
-            .expect("failed to install signal handler")
-            .recv()
-            .await;
+        let mut signal = signal::unix::signal(signal::unix::SignalKind::terminate())
+            .context("failed to install SIGTERM handler")?;
+        signal.recv().await;
+        Ok::<(), anyhow::Error>(())
     };
 
     #[cfg(not(unix))]
-    let terminate = std::future::pending();
+    let terminate = std::future::pending::<Result<()>>();
 
     let graceful = client.clone();
     let mut client_handle = client.run();
 
     tokio::select! {
-        () = ctrl_c => {},
-        () = terminate => {},
+        result = ctrl_c => result?,
+        result = terminate => result?,
         result = &mut client_handle => {
             result??;
             anyhow::bail!("client task exited unexpectedly");
