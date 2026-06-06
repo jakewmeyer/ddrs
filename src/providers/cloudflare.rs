@@ -4,10 +4,11 @@ use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use compact_str::CompactString;
+use reqwest::Response;
 use reqwest_middleware::ClientWithMiddleware as HttpClient;
 use secrecy::{ExposeSecret, SecretString};
-use serde::Deserialize;
-use serde_json::json;
+use serde::{Deserialize, de::DeserializeOwned};
+use serde_json::{Value, json};
 use smallvec::SmallVec;
 
 use crate::client::{IpUpdate, IpVersion, Provider};
@@ -49,8 +50,33 @@ fn default_comment() -> CompactString {
 }
 
 #[derive(Debug, Deserialize)]
-struct ZoneList {
-    result: Option<Vec<ZoneResult>>,
+struct CloudflareResponse<T> {
+    success: bool,
+    result: Option<T>,
+    #[serde(default)]
+    errors: Vec<CloudflareError>,
+}
+
+impl<T> CloudflareResponse<T> {
+    fn error_summary(&self) -> Option<String> {
+        let messages = self
+            .errors
+            .iter()
+            .filter_map(|error| error.message.as_deref())
+            .filter(|message| !message.is_empty())
+            .collect::<Vec<_>>();
+
+        if messages.is_empty() {
+            None
+        } else {
+            Some(messages.join(", "))
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct CloudflareError {
+    message: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -59,38 +85,23 @@ struct ZoneResult {
 }
 
 #[derive(Debug, Deserialize)]
-struct RecordsList {
-    result: Option<Vec<RecordResult>>,
-}
-
-#[derive(Debug, Deserialize)]
 struct RecordResult {
     id: String,
 }
 
-#[derive(Debug, Deserialize)]
-struct UpdatedResult {
-    success: bool,
-}
-
-#[derive(Debug, Deserialize)]
-struct CreatedResult {
-    success: bool,
-}
-
 impl Cloudflare {
     async fn fetch_zone_id(&self, request: &HttpClient) -> Result<String> {
-        let zones = request
+        let response = request
             .get(format!("{}/zones", self.api_url))
             .query(&[("name", &self.zone)])
             .bearer_auth(self.api_token.expose_secret())
             .send()
-            .await?
-            .json::<ZoneList>()
             .await?;
-        let zone_result = zones.result.ok_or(anyhow!(
-            "failed to list Cloudflare zones, is your token valid?"
-        ))?;
+        let zones =
+            parse_cloudflare_response::<Vec<ZoneResult>>(response, "list Cloudflare zones").await?;
+        let zone_result = zones
+            .result
+            .ok_or(anyhow!("failed to list Cloudflare zones: missing result"))?;
         Ok(zone_result
             .first()
             .ok_or(anyhow!("failed to find a matching Cloudflare zone"))?
@@ -105,17 +116,20 @@ impl Cloudflare {
         record_type: &str,
         domain: &Domain,
     ) -> Result<Vec<RecordResult>> {
-        let records = request
+        let response = request
             .get(format!("{}/zones/{}/dns_records", self.api_url, zone_id))
             .query(&[("name", &domain.name)])
             .query(&[("type", record_type)])
             .bearer_auth(self.api_token.expose_secret())
             .send()
-            .await?
-            .json::<RecordsList>()
             .await?;
+        let records = parse_cloudflare_response::<Vec<RecordResult>>(
+            response,
+            &format!("list Cloudflare DNS records for {}", domain.name),
+        )
+        .await?;
         records.result.ok_or(anyhow!(
-            "failed to list Cloudflare DNS records for {}",
+            "failed to list Cloudflare DNS records for {}: missing result",
             domain.name
         ))
     }
@@ -129,7 +143,7 @@ impl Cloudflare {
         domain: &Domain,
         address: &IpAddr,
     ) -> Result<()> {
-        let updated = request
+        let response = request
             .put(format!(
                 "{}/zones/{}/dns_records/{}",
                 self.api_url, zone_id, record_id,
@@ -144,15 +158,12 @@ impl Cloudflare {
             }))
             .bearer_auth(self.api_token.expose_secret())
             .send()
-            .await?
-            .json::<UpdatedResult>()
             .await?;
-        if !updated.success {
-            return Err(anyhow!(
-                "failed to update Cloudflare domain ({}) record",
-                domain.name
-            ));
-        }
+        parse_cloudflare_response::<Value>(
+            response,
+            &format!("update Cloudflare domain ({}) record", domain.name),
+        )
+        .await?;
         Ok(())
     }
 
@@ -164,7 +175,7 @@ impl Cloudflare {
         domain: &Domain,
         address: &IpAddr,
     ) -> Result<()> {
-        let created = request
+        let response = request
             .post(format!("{}/zones/{}/dns_records", self.api_url, zone_id))
             .json(&json!({
                 "type": record_type,
@@ -176,17 +187,71 @@ impl Cloudflare {
             }))
             .bearer_auth(self.api_token.expose_secret())
             .send()
-            .await?
-            .json::<CreatedResult>()
             .await?;
-        if !created.success {
-            return Err(anyhow!(
-                "failed to create Cloudflare domain ({}) record",
-                domain.name
-            ));
-        }
+        parse_cloudflare_response::<Value>(
+            response,
+            &format!("create Cloudflare domain ({}) record", domain.name),
+        )
+        .await?;
         Ok(())
     }
+}
+
+async fn parse_cloudflare_response<T>(
+    response: Response,
+    action: &str,
+) -> Result<CloudflareResponse<T>>
+where
+    T: DeserializeOwned,
+{
+    let status = response.status();
+    let body = response.text().await?;
+    let parsed = serde_json::from_str::<CloudflareResponse<T>>(&body);
+
+    if !status.is_success() {
+        let detail = parsed
+            .as_ref()
+            .ok()
+            .and_then(CloudflareResponse::error_summary)
+            .or_else(|| body_snippet(&body));
+        let detail = detail.map_or_else(String::new, |detail| format!(": {detail}"));
+
+        return Err(anyhow!("failed to {action}: HTTP {status}{detail}"));
+    }
+
+    let parsed = parsed
+        .map_err(|error| anyhow!("failed to parse Cloudflare response for {action}: {error}"))?;
+    if !parsed.success {
+        let detail = parsed
+            .error_summary()
+            .unwrap_or_else(|| "Cloudflare API returned success=false".to_string());
+        return Err(anyhow!("failed to {action}: {detail}"));
+    }
+
+    Ok(parsed)
+}
+
+fn body_snippet(body: &str) -> Option<String> {
+    const MAX_BODY_CHARS: usize = 200;
+
+    let body = body.trim();
+    if body.is_empty() {
+        return None;
+    }
+
+    let mut end = body.len();
+    for (count, (index, _)) in body.char_indices().enumerate() {
+        if count == MAX_BODY_CHARS {
+            end = index;
+            break;
+        }
+    }
+
+    let mut snippet = body[..end].to_string();
+    if end < body.len() {
+        snippet.push_str("...");
+    }
+    Some(snippet)
 }
 
 #[async_trait]
@@ -296,7 +361,97 @@ mod tests {
         let error = provider.update(UPDATE_BOTH, http).await.unwrap_err();
         assert_eq!(
             error.to_string(),
-            "failed to list Cloudflare zones, is your token valid?"
+            "failed to list Cloudflare zones: HTTP 403 Forbidden: Invalid access token"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_cloudflare_rejects_non_success_http_status() {
+        let mock = MockServer::start().await;
+        let http: HttpClient = ClientBuilder::new(InnerHttpClient::new()).build();
+
+        let provider = Cloudflare {
+            zone: "example.com".into(),
+            api_token: "token".into(),
+            domains: smallvec![Domain {
+                name: "example.com".into(),
+                ttl: 1,
+                proxied: true,
+                comment: "Created by DDRS".into(),
+            }],
+            api_url: mock.uri(),
+        };
+
+        Mock::given(method("GET"))
+            .and(path("/zones"))
+            .and(bearer_token(provider.api_token.expose_secret()))
+            .and(query_param("name", &*provider.zone))
+            .respond_with(ResponseTemplate::new(500).set_body_json(json!({
+                "success": true,
+                "errors": [],
+                "messages": [],
+                "result": [
+                    {
+                        "id": "023e105f4ecef8ad9ca31a8372d0c353",
+                        "name": "example.com",
+                    }
+                ]
+            })))
+            .expect(1)
+            .mount(&mock)
+            .await;
+
+        let error = provider.update(UPDATE_BOTH, http).await.unwrap_err();
+        let error = error.to_string();
+        assert!(error.contains("failed to list Cloudflare zones: HTTP 500 Internal Server Error"));
+        assert!(error.contains("\"success\":true"));
+    }
+
+    #[tokio::test]
+    async fn test_cloudflare_rejects_api_failure_on_success_http_status() {
+        let mock = MockServer::start().await;
+        let http: HttpClient = ClientBuilder::new(InnerHttpClient::new()).build();
+
+        let provider = Cloudflare {
+            zone: "example.com".into(),
+            api_token: "token".into(),
+            domains: smallvec![Domain {
+                name: "example.com".into(),
+                ttl: 1,
+                proxied: true,
+                comment: "Created by DDRS".into(),
+            }],
+            api_url: mock.uri(),
+        };
+
+        Mock::given(method("GET"))
+            .and(path("/zones"))
+            .and(bearer_token(provider.api_token.expose_secret()))
+            .and(query_param("name", &*provider.zone))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "success": false,
+                "errors": [
+                    {
+                        "code": 10000,
+                        "message": "Authentication error"
+                    }
+                ],
+                "messages": [],
+                "result": [
+                    {
+                        "id": "023e105f4ecef8ad9ca31a8372d0c353",
+                        "name": "example.com",
+                    }
+                ]
+            })))
+            .expect(1)
+            .mount(&mock)
+            .await;
+
+        let error = provider.update(UPDATE_BOTH, http).await.unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "failed to list Cloudflare zones: Authentication error"
         );
     }
 
