@@ -18,12 +18,12 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
 use crate::cache::Cache;
-use crate::config::Config;
+use crate::config::{Config, NonEmptyString};
 
 static USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"),);
 
 /// IP version without associated address
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IpVersion {
     V4,
@@ -33,7 +33,7 @@ pub enum IpVersion {
 /// IP interface source serde representation
 #[derive(Debug, Deserialize)]
 pub struct IpSourceInterface {
-    name: String,
+    name: NonEmptyString,
 }
 
 /// IP source for fetching the address
@@ -93,18 +93,19 @@ pub struct Client {
 impl Client {
     pub fn new(config: Config) -> Arc<Client> {
         let client = InnerHttpClient::builder()
-            .timeout(config.timeout)
-            .connect_timeout(config.connect_timeout)
+            .timeout(config.timeout.get())
+            .connect_timeout(config.connect_timeout.get())
             .user_agent(USER_AGENT)
             .http2_adaptive_window(true)
             .build()
             .expect("Failed to build HTTP client");
-        let retry_policy = ExponentialBackoff::builder().build_with_max_retries(config.retries);
+        let retry_policy =
+            ExponentialBackoff::builder().build_with_max_retries(config.retries.get());
         let request = ClientBuilder::new(client)
             .with(RetryTransientMiddleware::new_with_policy(retry_policy))
             .build();
         Arc::new(Client {
-            cache: Cache::new(&config.cache_path),
+            cache: Cache::new(config.cache_path.clone()),
             request,
             shutdown: CancellationToken::new(),
             config,
@@ -112,7 +113,7 @@ impl Client {
     }
 
     /// Fetches the IP address via a HTTP request
-    async fn fetch_ip_http(&self, version: &IpVersion) -> Result<IpAddr> {
+    async fn fetch_ip_http(&self, version: IpVersion) -> Result<IpAddr> {
         let urls = match version {
             IpVersion::V4 => &self.config.http_ipv4,
             IpVersion::V6 => &self.config.http_ipv6,
@@ -145,10 +146,10 @@ impl Client {
     /// Starts the client
     pub fn run(self: Arc<Self>) -> JoinHandle<Result<()>> {
         tokio::spawn(async move {
-            let mut interval = time::interval(self.config.interval);
+            let mut interval = time::interval(self.config.interval.get());
             info!(
                 "Started DDRS client, checking IP address every {:?}",
-                self.config.interval
+                self.config.interval.get()
             );
             time::sleep(Duration::from_secs(2)).await;
             loop {
@@ -163,7 +164,7 @@ impl Client {
                             v4: None,
                             v6: None,
                         };
-                        for version in &self.config.versions {
+                        for version in self.config.versions.iter() {
                             let ip_result = match &self.config.source {
                                 IpSource::Http => self.fetch_ip_http(version).await.context("Failed to fetch IP via HTTP"),
                                 IpSource::Interface(interface) => fetch_ip_interface(interface, version).context("Failed to fetch IP via interface"),
@@ -251,10 +252,10 @@ impl Client {
 }
 
 /// Fetches the IP address of a specific network interface
-fn fetch_ip_interface(interface: &IpSourceInterface, version: &IpVersion) -> Result<IpAddr> {
+fn fetch_ip_interface(interface: &IpSourceInterface, version: IpVersion) -> Result<IpAddr> {
     let interfaces = list_afinet_netifas()?;
     for iface in interfaces {
-        if iface.0 == interface.name {
+        if iface.0 == interface.name.as_str() {
             match version {
                 IpVersion::V4 => {
                     if iface.1.is_ipv4() {
@@ -271,11 +272,11 @@ fn fetch_ip_interface(interface: &IpSourceInterface, version: &IpVersion) -> Res
     }
     Err(anyhow!(
         "Failed to find network interface: {}",
-        interface.name
+        interface.name.as_str()
     ))
 }
 
-fn parse_ip_for_version(version: &IpVersion, body: &str) -> Result<IpAddr> {
+fn parse_ip_for_version(version: IpVersion, body: &str) -> Result<IpAddr> {
     let body = body.trim();
     match version {
         IpVersion::V4 => body

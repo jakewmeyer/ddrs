@@ -4,7 +4,7 @@
 
 use std::{ffi::OsString, path::Path};
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result};
 use clap::Parser;
 use client::Client;
 use tokio::signal;
@@ -39,10 +39,6 @@ async fn main() -> Result<()> {
     };
 
     let config = toml::from_str::<Config>(&std::fs::read_to_string(config_path)?)?;
-
-    if config.providers.is_empty() {
-        return Err(anyhow!("No providers configured"));
-    }
 
     for provider in &config.providers {
         provider.validate_config()?;
