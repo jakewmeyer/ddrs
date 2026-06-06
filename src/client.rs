@@ -98,7 +98,7 @@ impl Client {
             .user_agent(USER_AGENT)
             .http2_adaptive_window(true)
             .build()
-            .expect("Failed to build HTTP client");
+            .expect("failed to build HTTP client");
         let retry_policy =
             ExponentialBackoff::builder().build_with_max_retries(config.retries.get());
         let request = ClientBuilder::new(client)
@@ -140,7 +140,7 @@ impl Client {
                 }
             }
         }
-        Err(last_err.unwrap_or_else(|| anyhow!("Failed to fetch IP address from HTTP")))
+        Err(last_err.unwrap_or_else(|| anyhow!("failed to fetch IP address from HTTP")))
     }
 
     /// Starts the client
@@ -166,8 +166,8 @@ impl Client {
                         };
                         for version in self.config.versions.iter() {
                             let ip_result = match &self.config.source {
-                                IpSource::Http => self.fetch_ip_http(version).await.context("Failed to fetch IP via HTTP"),
-                                IpSource::Interface(interface) => fetch_ip_interface(interface, version).context("Failed to fetch IP via interface"),
+                                IpSource::Http => self.fetch_ip_http(version).await.context("failed to fetch IP via HTTP"),
+                                IpSource::Interface(interface) => fetch_ip_interface(interface, version).context("failed to fetch IP via interface"),
                             };
                             match ip_result {
                                 Ok(ip) => match version {
@@ -271,7 +271,7 @@ fn fetch_ip_interface(interface: &IpSourceInterface, version: IpVersion) -> Resu
         }
     }
     Err(anyhow!(
-        "Failed to find network interface: {}",
+        "failed to find network interface: {}",
         interface.name.as_str()
     ))
 }
@@ -282,10 +282,10 @@ fn parse_ip_for_version(version: IpVersion, body: &str) -> Result<IpAddr> {
         IpVersion::V4 => body
             .parse::<Ipv4Addr>()
             .map(IpAddr::V4)
-            .context("Expected IPv4 address"),
+            .context("expected IPv4 address"),
         IpVersion::V6 => body
             .parse::<Ipv6Addr>()
             .map(IpAddr::V6)
-            .context("Expected IPv6 address"),
+            .context("expected IPv6 address"),
     }
 }

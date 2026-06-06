@@ -111,7 +111,7 @@ impl Cache {
         let parent = self
             .path
             .parent()
-            .ok_or(anyhow!("Invalid directory for cache file"))?;
+            .ok_or(anyhow!("invalid directory for cache file"))?;
         fs::create_dir_all(parent).await?;
 
         // Write to a temp file first
@@ -125,7 +125,7 @@ impl Cache {
         item.serialize(&mut Serializer::new(&mut data).with_struct_map())?;
         if data.len() > MAX_DATA_SIZE {
             return Err(anyhow!(
-                "Serialized cache payload is too large: {} bytes, maximum is {MAX_DATA_SIZE} bytes",
+                "serialized cache payload is too large: {} bytes, maximum is {MAX_DATA_SIZE} bytes",
                 data.len()
             ));
         }
@@ -173,7 +173,7 @@ impl Cache {
         let file_length = file.metadata().await?.len();
         if file_length < HEADER_SIZE as u64 {
             return Err(anyhow!(
-                "Cache file is truncated: not long enough for header"
+                "cache file is truncated: not long enough for header"
             ));
         }
 
@@ -181,7 +181,7 @@ impl Cache {
         if let Err(e) = file.read_exact(&mut header_buffer).await {
             if e.kind() == ErrorKind::UnexpectedEof {
                 return Err(anyhow!(
-                    "Cache file is truncated: could not read complete header"
+                    "cache file is truncated: could not read complete header"
                 ));
             }
             return Err(e.into());
@@ -192,17 +192,17 @@ impl Cache {
         let mut magic: [u8; 4] = [0; 4];
         cursor.read_exact(&mut magic).await?;
         if magic != *MAGIC_IDENTIFIER {
-            return Err(anyhow!("Invalid magic header: {magic:#?}"));
+            return Err(anyhow!("invalid magic header: {magic:#?}"));
         }
 
         let version = cursor.read_u16().await?;
         if version != VERSION {
-            return Err(anyhow!("Invalid cache file version"));
+            return Err(anyhow!("invalid cache file version"));
         }
 
         let flags = cursor.read_u16().await?;
         if flags != 0 {
-            return Err(anyhow!("Unsupported cache flags: 0x{flags:04x}"));
+            return Err(anyhow!("unsupported cache flags: 0x{flags:04x}"));
         }
 
         let data_length = cursor.read_u32().await?.try_into()?;
@@ -213,13 +213,13 @@ impl Cache {
         let calculated_header_checksum = hasher.finalize();
         if calculated_header_checksum != header_checksum {
             return Err(anyhow!(
-                "Invalid cache file header checksum: Stored: {header_checksum} != Calculated: {calculated_header_checksum}"
+                "invalid cache file header checksum: stored: {header_checksum} != calculated: {calculated_header_checksum}"
             ));
         }
 
         if data_length > MAX_DATA_SIZE {
             return Err(anyhow!(
-                "Cache file payload is too large: header declares {data_length} bytes, maximum is {MAX_DATA_SIZE} bytes"
+                "cache file payload is too large: header declares {data_length} bytes, maximum is {MAX_DATA_SIZE} bytes"
             ));
         }
 
@@ -228,13 +228,13 @@ impl Cache {
 
         if expected_length > file_length {
             return Err(anyhow!(
-                "Cache file is truncated: header declares {expected_length} bytes, file is {file_length} bytes"
+                "cache file is truncated: header declares {expected_length} bytes, file is {file_length} bytes"
             ));
         }
 
         if expected_length < file_length {
             return Err(anyhow!(
-                "Cache file is too large: header declares {expected_length} bytes, file is {file_length} bytes"
+                "cache file is too large: header declares {expected_length} bytes, file is {file_length} bytes"
             ));
         }
 
@@ -246,7 +246,7 @@ impl Cache {
         let calculated_checksum = hasher.finalize();
         if calculated_checksum != data_checksum {
             return Err(anyhow!(
-                "Invalid cache file data checksum: Stored: {data_checksum} != Calculated: {calculated_checksum}"
+                "invalid cache file data checksum: stored: {data_checksum} != calculated: {calculated_checksum}"
             ));
         }
         let item = rmp_serde::from_slice(&data)?;
@@ -376,7 +376,7 @@ mod tests {
         let err = res.unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Cache file is truncated: not long enough for header"
+            "cache file is truncated: not long enough for header"
         );
         Ok(())
     }
@@ -398,7 +398,7 @@ mod tests {
         let res: Result<Option<TestData>> = cache.get().await;
         assert!(res.is_err());
         let err = res.unwrap_err();
-        assert!(err.to_string().starts_with("Invalid magic header"));
+        assert!(err.to_string().starts_with("invalid magic header"));
         Ok(())
     }
 
@@ -419,7 +419,7 @@ mod tests {
 
         let res: Result<Option<TestData>> = cache.get().await;
         assert!(res.is_err());
-        assert_eq!(res.unwrap_err().to_string(), "Invalid cache file version");
+        assert_eq!(res.unwrap_err().to_string(), "invalid cache file version");
         Ok(())
     }
 
@@ -441,7 +441,7 @@ mod tests {
         let res: Result<Option<TestData>> = cache.get().await;
         assert!(res.is_err());
         let msg = res.unwrap_err().to_string();
-        assert!(msg.contains("Invalid cache file header checksum"));
+        assert!(msg.contains("invalid cache file header checksum"));
         Ok(())
     }
 
@@ -468,7 +468,7 @@ mod tests {
         assert!(res.is_err());
         assert_eq!(
             res.unwrap_err().to_string(),
-            "Unsupported cache flags: 0x0001"
+            "unsupported cache flags: 0x0001"
         );
         Ok(())
     }
@@ -495,7 +495,7 @@ mod tests {
         let res: Result<Option<TestData>> = cache.get().await;
         assert!(res.is_err());
         let msg = res.unwrap_err().to_string();
-        assert!(msg.contains("Invalid cache file data checksum"));
+        assert!(msg.contains("invalid cache file data checksum"));
         Ok(())
     }
 
@@ -522,7 +522,7 @@ mod tests {
         assert_eq!(
             res.unwrap_err().to_string(),
             format!(
-                "Cache file payload is too large: header declares {} bytes, maximum is {MAX_DATA_SIZE} bytes",
+                "cache file payload is too large: header declares {} bytes, maximum is {MAX_DATA_SIZE} bytes",
                 MAX_DATA_SIZE + 1
             )
         );
@@ -553,7 +553,7 @@ mod tests {
         let res = cache.set(td).await;
         assert!(res.is_err());
         let msg = res.unwrap_err().to_string();
-        assert!(msg.starts_with("Serialized cache payload is too large"));
+        assert!(msg.starts_with("serialized cache payload is too large"));
         assert!(msg.contains(&format!("maximum is {MAX_DATA_SIZE} bytes")));
         assert!(!cache.path.exists());
         Ok(())

@@ -114,7 +114,7 @@ impl TryFrom<RawConfig> for Config {
         }
 
         if raw.providers.is_empty() {
-            return Err(anyhow!("No providers configured"));
+            return Err(anyhow!("no providers configured"));
         }
 
         Ok(Self {
@@ -294,7 +294,7 @@ name = "example.com"
     fn rejects_missing_providers() {
         let error = toml::from_str::<Config>("").unwrap_err().to_string();
 
-        assert!(error.contains("No providers configured"));
+        assert!(error.contains("no providers configured"));
     }
 
     #[test]

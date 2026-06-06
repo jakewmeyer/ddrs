@@ -129,14 +129,14 @@ impl Porkbun {
             .await?;
         match record_result.status {
             ResponseStatus::Error => Err(anyhow!(
-                "Failed to list Porkbun domain ({}) records, Error: {:?}",
+                "failed to list Porkbun domain ({}) records, error: {:?}",
                 domain.name,
                 record_result.message,
             )),
             ResponseStatus::Success => match record_result.records {
                 Some(records) => Ok(records),
                 None => Err(anyhow!(
-                    "No Porkbun records found for domain ({})",
+                    "no Porkbun records found for domain ({})",
                     domain.name
                 )),
             },
@@ -168,7 +168,7 @@ impl Porkbun {
             .await?;
         match updated.status {
             ResponseStatus::Error => Err(anyhow!(
-                "Failed to update Porkbun domain ({}) record, Error: {:?}",
+                "failed to update Porkbun domain ({}) record, error: {:?}",
                 domain.name,
                 updated.message,
             )),
@@ -200,7 +200,7 @@ impl Porkbun {
             .await?;
         match created.status {
             ResponseStatus::Error => Err(anyhow!(
-                "Failed to create Porkbun domain ({}) record, Error: {:?}",
+                "failed to create Porkbun domain ({}) record, error: {:?}",
                 domain.name,
                 created.message,
             )),
@@ -214,7 +214,7 @@ impl Porkbun {
 impl Provider for Porkbun {
     fn validate_config(&self) -> Result<()> {
         if self.domains.is_empty() {
-            return Err(anyhow!("Porkbun provider has no domains configured"));
+            return Err(anyhow!("no domains configured for Porkbun provider"));
         }
         Ok(())
     }
@@ -304,7 +304,7 @@ mod tests {
         let error = provider.update(UPDATE_BOTH, http).await.unwrap_err();
         assert_eq!(
             error.to_string(),
-            "Failed to list Porkbun domain (example.com) records, Error: Some(\"Invalid API key. (001)\")"
+            "failed to list Porkbun domain (example.com) records, error: Some(\"Invalid API key. (001)\")"
         );
     }
 

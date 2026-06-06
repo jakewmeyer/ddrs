@@ -89,11 +89,11 @@ impl Cloudflare {
             .json::<ZoneList>()
             .await?;
         let zone_result = zones.result.ok_or(anyhow!(
-            "Failed to list Cloudflare zones, is your token valid?"
+            "failed to list Cloudflare zones, is your token valid?"
         ))?;
         Ok(zone_result
             .first()
-            .ok_or(anyhow!("Failed to find a matching Cloudflare zone"))?
+            .ok_or(anyhow!("failed to find a matching Cloudflare zone"))?
             .id
             .clone())
     }
@@ -115,7 +115,7 @@ impl Cloudflare {
             .json::<RecordsList>()
             .await?;
         records.result.ok_or(anyhow!(
-            "Failed to list Cloudflare DNS records for {}",
+            "failed to list Cloudflare DNS records for {}",
             domain.name
         ))
     }
@@ -149,7 +149,7 @@ impl Cloudflare {
             .await?;
         if !updated.success {
             return Err(anyhow!(
-                "Failed to update Cloudflare domain ({}) record",
+                "failed to update Cloudflare domain ({}) record",
                 domain.name
             ));
         }
@@ -181,7 +181,7 @@ impl Cloudflare {
             .await?;
         if !created.success {
             return Err(anyhow!(
-                "Failed to create Cloudflare domain ({}) record",
+                "failed to create Cloudflare domain ({}) record",
                 domain.name
             ));
         }
@@ -194,7 +194,7 @@ impl Cloudflare {
 impl Provider for Cloudflare {
     fn validate_config(&self) -> Result<()> {
         if self.domains.is_empty() {
-            return Err(anyhow!("Cloudflare provider has no domains configured"));
+            return Err(anyhow!("no domains configured for Cloudflare provider"));
         }
         Ok(())
     }
@@ -296,7 +296,7 @@ mod tests {
         let error = provider.update(UPDATE_BOTH, http).await.unwrap_err();
         assert_eq!(
             error.to_string(),
-            "Failed to list Cloudflare zones, is your token valid?"
+            "failed to list Cloudflare zones, is your token valid?"
         );
     }
 
@@ -333,7 +333,7 @@ mod tests {
         let error = provider.update(UPDATE_BOTH, http).await.unwrap_err();
         assert_eq!(
             error.to_string(),
-            "Failed to find a matching Cloudflare zone"
+            "failed to find a matching Cloudflare zone"
         );
     }
 
