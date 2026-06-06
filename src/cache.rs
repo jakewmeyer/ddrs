@@ -156,8 +156,8 @@ impl Cache {
         file.write_all(&buf).await?;
         file.flush().await?;
         file.sync_all().await?;
-
         fs::rename(tmp_path, &self.path).await?;
+        File::open(parent).await?.sync_all().await?;
 
         Ok(())
     }
