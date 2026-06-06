@@ -87,6 +87,10 @@ const MAX_DATA_SIZE: usize = 1024 * 1024;
 /// |                    Data Checksum (4 bytes)                    |
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 /// ```
+///
+/// Multi-byte integer fields are encoded in big-endian byte order. The
+/// header checksum is CRC32 over the first 12 header bytes, and the data
+/// checksum is CRC32 over the serialized data bytes.
 #[derive(Debug)]
 pub struct Cache {
     path: PathBuf,
@@ -202,11 +206,6 @@ impl Cache {
         }
 
         let data_length = cursor.read_u32().await?.try_into()?;
-        if data_length > MAX_DATA_SIZE {
-            return Err(anyhow!(
-                "Cache file payload is too large: header declares {data_length} bytes, maximum is {MAX_DATA_SIZE} bytes"
-            ));
-        }
 
         let header_checksum = cursor.read_u32().await?;
         let mut hasher = Hasher::new();
@@ -215,6 +214,12 @@ impl Cache {
         if calculated_header_checksum != header_checksum {
             return Err(anyhow!(
                 "Invalid cache file header checksum: Stored: {header_checksum} != Calculated: {calculated_header_checksum}"
+            ));
+        }
+
+        if data_length > MAX_DATA_SIZE {
+            return Err(anyhow!(
+                "Cache file payload is too large: header declares {data_length} bytes, maximum is {MAX_DATA_SIZE} bytes"
             ));
         }
 
