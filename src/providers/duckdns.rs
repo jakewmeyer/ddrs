@@ -1,6 +1,7 @@
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use compact_str::CompactString;
+use reqwest::Response;
 use reqwest_middleware::ClientWithMiddleware as HttpClient;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
@@ -38,15 +39,9 @@ impl DuckDns {
             params.push(("ipv6", ip.to_string()));
         }
 
-        let body = request
-            .get(self.update_url())
-            .query(&params)
-            .send()
-            .await?
-            .text()
-            .await?;
+        let response = request.get(self.update_url()).query(&params).send().await?;
 
-        parse_update_response(&body)
+        parse_update_response(response).await
     }
 
     fn update_url(&self) -> String {
@@ -92,7 +87,21 @@ impl Provider for DuckDns {
     }
 }
 
-fn parse_update_response(body: &str) -> Result<bool> {
+async fn parse_update_response(response: Response) -> Result<bool> {
+    let status = response.status();
+    let body = response.text().await?;
+
+    if !status.is_success() {
+        let detail = body_snippet(&body).map_or_else(String::new, |body| format!(": {body}"));
+        return Err(anyhow!(
+            "failed to update Duck DNS domains: HTTP {status}{detail}"
+        ));
+    }
+
+    parse_update_response_body(&body)
+}
+
+fn parse_update_response_body(body: &str) -> Result<bool> {
     let mut lines = body.lines().map(str::trim).filter(|line| !line.is_empty());
     let Some(first) = lines.next() else {
         return Err(anyhow!("empty Duck DNS response"));
@@ -113,6 +122,29 @@ fn parse_update_response(body: &str) -> Result<bool> {
     }
 
     Ok(true)
+}
+
+fn body_snippet(body: &str) -> Option<String> {
+    const MAX_BODY_CHARS: usize = 200;
+
+    let body = body.trim();
+    if body.is_empty() {
+        return None;
+    }
+
+    let mut end = body.len();
+    for (count, (index, _)) in body.char_indices().enumerate() {
+        if count == MAX_BODY_CHARS {
+            end = index;
+            break;
+        }
+    }
+
+    let mut snippet = body[..end].to_string();
+    if end < body.len() {
+        snippet.push_str("...");
+    }
+    Some(snippet)
 }
 
 #[cfg(test)]
@@ -187,6 +219,32 @@ domains = ["example"]
 
         let error = provider.update(UPDATE_BOTH, http).await.unwrap_err();
         assert_eq!(error.to_string(), "Duck DNS update rejected request");
+    }
+
+    #[tokio::test]
+    async fn test_duckdns_rejects_non_success_http_status() {
+        let mock = MockServer::start().await;
+        let http: HttpClient = ClientBuilder::new(InnerHttpClient::new()).build();
+        let provider = provider(mock.uri());
+
+        Mock::given(method("GET"))
+            .and(path("/update"))
+            .respond_with(ResponseTemplate::new(500).set_body_string(format!(
+                "OK\n{}\n{}\nUPDATED",
+                Ipv4Addr::LOCALHOST,
+                Ipv6Addr::LOCALHOST
+            )))
+            .expect(1)
+            .mount(&mock)
+            .await;
+
+        let error = provider.update(UPDATE_BOTH, http).await.unwrap_err();
+        let message = error.to_string();
+        assert!(
+            message.contains("failed to update Duck DNS domains: HTTP 500 Internal Server Error"),
+            "{message}"
+        );
+        assert!(message.contains("OK"), "{message}");
     }
 
     #[tokio::test]
