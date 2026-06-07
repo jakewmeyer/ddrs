@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use core::fmt;
 use dyn_clone::DynClone;
 use local_ip_address::list_afinet_netifas;
-use reqwest::Client as InnerHttpClient;
+use reqwest::{Client as InnerHttpClient, Response};
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware as HttpClient};
 use reqwest_retry::RetryTransientMiddleware;
 use reqwest_retry::policies::ExponentialBackoff;
@@ -21,6 +21,7 @@ use crate::cache::Cache;
 use crate::config::{Config, NonEmptyString};
 
 static USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"),);
+const MAX_IP_LOOKUP_BODY_BYTES: usize = 256;
 
 /// IP version without associated address
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -149,19 +150,15 @@ impl Client {
         let mut last_err: Option<anyhow::Error> = None;
         for url in urls {
             match self.request.get(url.as_str()).send().await {
-                Ok(resp) => match resp.text().await {
-                    Ok(body) => match parse_ip_for_version(version, &body) {
+                Ok(response) => {
+                    match parse_ip_lookup_response(response, version, url.as_str()).await {
                         Ok(ip) => return Ok(ip),
-                        Err(e) => {
-                            debug!("Failed to parse {version:?} IP from {url}: {e}");
-                            last_err = Some(e);
+                        Err(error) => {
+                            debug!("IP lookup failed for {url}: {error}");
+                            last_err = Some(error);
                         }
-                    },
-                    Err(e) => {
-                        debug!("Failed to read body from {}: {}", url, e);
-                        last_err = Some(e.into());
                     }
-                },
+                }
                 Err(e) => {
                     debug!("HTTP request failed for {}: {}", url, e);
                     last_err = Some(e.into());
@@ -332,16 +329,174 @@ fn parse_ip_for_version(version: IpVersion, body: &str) -> Result<IpAddr> {
     }
 }
 
+async fn parse_ip_lookup_response(
+    response: Response,
+    version: IpVersion,
+    url: &str,
+) -> Result<IpAddr> {
+    let status = response.status();
+    let body = read_ip_lookup_body(response).await;
+
+    if !status.is_success() {
+        let detail = match body {
+            Ok(body) => response_body_detail(&body),
+            Err(error) => format!(": failed to read response body: {error}"),
+        };
+        return Err(anyhow!("IP lookup {url} returned HTTP {status}{detail}"));
+    }
+
+    let body = body?;
+    parse_ip_for_version(version, &body)
+        .with_context(|| format!("failed to parse {version:?} IP lookup response from {url}"))
+}
+
+async fn read_ip_lookup_body(mut response: Response) -> Result<String> {
+    if let Some(length) = response.content_length() {
+        let max_length = u64::try_from(MAX_IP_LOOKUP_BODY_BYTES)?;
+        if length > max_length {
+            return Err(anyhow!(
+                "IP lookup response body exceeded {MAX_IP_LOOKUP_BODY_BYTES} bytes"
+            ));
+        }
+    }
+
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        if chunk.len() > MAX_IP_LOOKUP_BODY_BYTES.saturating_sub(body.len()) {
+            return Err(anyhow!(
+                "IP lookup response body exceeded {MAX_IP_LOOKUP_BODY_BYTES} bytes"
+            ));
+        }
+        body.extend_from_slice(&chunk);
+    }
+
+    String::from_utf8(body).context("IP lookup response body was not valid UTF-8")
+}
+
+fn response_body_detail(body: &str) -> String {
+    let body = body.trim();
+    if body.is_empty() {
+        String::new()
+    } else {
+        format!(": {body}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::net::{Ipv4Addr, Ipv6Addr};
 
-    use super::IpUpdate;
+    use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
+
+    use super::{Client, IpUpdate, IpVersion, MAX_IP_LOOKUP_BODY_BYTES};
+    use crate::config::Config;
 
     const OLD_V4: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 1);
     const NEW_V4: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 2);
     const OLD_V6: Ipv6Addr = Ipv6Addr::LOCALHOST;
     const NEW_V6: Ipv6Addr = Ipv6Addr::UNSPECIFIED;
+
+    fn config_with_http_ipv4(urls: &[String]) -> Config {
+        let urls = urls
+            .iter()
+            .map(|url| format!("\"{url}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        toml::from_str(&format!(
+            r#"
+retries = 0
+http_ipv4 = [{urls}]
+
+[[providers]]
+type = "cloudflare"
+zone = "example.com"
+api_token = "token"
+
+[[providers.domains]]
+name = "example.com"
+"#
+        ))
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn fetch_ip_http_rejects_non_success_status() {
+        let mock = MockServer::start().await;
+        let url = mock.uri();
+        let client = Client::new(config_with_http_ipv4(std::slice::from_ref(&url))).unwrap();
+
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("192.0.2.1"))
+            .expect(1)
+            .mount(&mock)
+            .await;
+
+        let error = client.fetch_ip_http(IpVersion::V4).await.unwrap_err();
+        let message = error.to_string();
+        assert!(
+            message.contains("IP lookup"),
+            "error should identify the IP lookup: {message}"
+        );
+        assert!(
+            message.contains(&url),
+            "error should include URL: {message}"
+        );
+        assert!(
+            message.contains("HTTP 500 Internal Server Error"),
+            "error should include status: {message}"
+        );
+        assert!(
+            message.contains("192.0.2.1"),
+            "error should include bounded response detail: {message}"
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_ip_http_uses_next_url_after_non_success_status() {
+        let bad = MockServer::start().await;
+        let good = MockServer::start().await;
+        let urls = [bad.uri(), good.uri()];
+        let client = Client::new(config_with_http_ipv4(&urls)).unwrap();
+
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("192.0.2.1"))
+            .expect(1)
+            .mount(&bad)
+            .await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("192.0.2.2\n"))
+            .expect(1)
+            .mount(&good)
+            .await;
+
+        let ip = client.fetch_ip_http(IpVersion::V4).await.unwrap();
+
+        assert_eq!(ip, Ipv4Addr::new(192, 0, 2, 2));
+    }
+
+    #[tokio::test]
+    async fn fetch_ip_http_rejects_oversized_body() {
+        let mock = MockServer::start().await;
+        let url = mock.uri();
+        let client = Client::new(config_with_http_ipv4(std::slice::from_ref(&url))).unwrap();
+
+        Mock::given(method("GET"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string("x".repeat(MAX_IP_LOOKUP_BODY_BYTES + 1)),
+            )
+            .expect(1)
+            .mount(&mock)
+            .await;
+
+        let error = client.fetch_ip_http(IpVersion::V4).await.unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("IP lookup response body exceeded 256 bytes")
+        );
+    }
 
     #[test]
     fn ip_update_changed_since_cache_only_keeps_observed_changes() {

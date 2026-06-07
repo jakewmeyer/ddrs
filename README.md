@@ -1,14 +1,14 @@
 # DDRS - A dynamic DNS client written in Rust 🦀
 
 ## Features
-* IP lookups via HTTP(S) or local network interfaces
+* IP lookups via HTTP(S) endpoints or local network interfaces
 * Support for multiple DNS providers
-* Support for multiple domains/subdomains
-* Support for IPv4, IPv6, or dual-stack
-* File based cache for most recent update
+* Support for multiple domains and subdomains
+* Support for IPv4, IPv6, or dual-stack updates
+* File-based cache of last-known IP state
 
 ## Supported DNS Providers
-- [x] [CloudFlare](https://www.cloudflare.com)
+- [x] [Cloudflare](https://www.cloudflare.com)
 - [x] [Porkbun](https://porkbun.com)
 - [x] [Duck DNS](https://duckdns.org)
 - [ ] [NameCheap](https://www.namecheap.com)
