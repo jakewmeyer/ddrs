@@ -4,9 +4,10 @@ use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use compact_str::CompactString;
+use reqwest::Response;
 use reqwest_middleware::ClientWithMiddleware as HttpClient;
 use secrecy::{ExposeSecret, SecretString};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::json;
 use smallvec::SmallVec;
 
@@ -79,16 +80,15 @@ enum ResponseStatus {
 }
 
 #[derive(Debug, Deserialize)]
-struct CreateRecordResult {
+struct PorkbunResponse<T> {
     status: ResponseStatus,
     message: Option<String>,
+    #[serde(flatten)]
+    data: T,
 }
 
 #[derive(Debug, Deserialize)]
-struct UpdateRecordResult {
-    status: ResponseStatus,
-    message: Option<String>,
-}
+struct EmptyResult {}
 
 #[derive(Debug, Deserialize)]
 struct RecordResult {
@@ -97,8 +97,6 @@ struct RecordResult {
 
 #[derive(Debug, Deserialize)]
 struct ListRecordsResult {
-    status: ResponseStatus,
-    message: Option<String>,
     records: Option<Vec<RecordResult>>,
 }
 
@@ -117,29 +115,27 @@ impl Porkbun {
             url.push('/');
             url.push_str(subdomain);
         }
-        let record_result = request
+        let response = request
             .post(url)
             .json(&json!({
                 "secretapikey": self.secret_api_key.expose_secret(),
                 "apikey": self.api_key.expose_secret(),
             }))
             .send()
-            .await?
-            .json::<ListRecordsResult>()
             .await?;
-        match record_result.status {
-            ResponseStatus::Error => Err(anyhow!(
-                "failed to list Porkbun domain ({}) records, error: {:?}",
-                domain.name,
-                record_result.message,
+
+        let response = parse_porkbun_response::<ListRecordsResult>(
+            response,
+            &format!("list Porkbun domain ({}) records", domain.name),
+        )
+        .await?;
+
+        match response.data.records {
+            Some(records) => Ok(records),
+            None => Err(anyhow!(
+                "no Porkbun records found for domain ({})",
+                domain.name
             )),
-            ResponseStatus::Success => match record_result.records {
-                Some(records) => Ok(records),
-                None => Err(anyhow!(
-                    "no Porkbun records found for domain ({})",
-                    domain.name
-                )),
-            },
         }
     }
 
@@ -150,8 +146,8 @@ impl Porkbun {
         record_type: &str,
         domain: &Domain,
         address: &IpAddr,
-    ) -> Result<UpdateRecordResult> {
-        let updated = request
+    ) -> Result<()> {
+        let response = request
             .post(format!("{}/dns/edit/{}/{}", self.api_url, domain.name, id))
             .json(&UpdateRecordBody {
                 secretapikey: self.secret_api_key.expose_secret(),
@@ -163,17 +159,13 @@ impl Porkbun {
                 notes: &domain.notes,
             })
             .send()
-            .await?
-            .json::<UpdateRecordResult>()
             .await?;
-        match updated.status {
-            ResponseStatus::Error => Err(anyhow!(
-                "failed to update Porkbun domain ({}) record, error: {:?}",
-                domain.name,
-                updated.message,
-            )),
-            ResponseStatus::Success => Ok(updated),
-        }
+        parse_porkbun_response::<EmptyResult>(
+            response,
+            &format!("update Porkbun domain ({}) record", domain.name),
+        )
+        .await?;
+        Ok(())
     }
 
     async fn create_dns_record(
@@ -182,8 +174,8 @@ impl Porkbun {
         record_type: &str,
         domain: &Domain,
         address: &IpAddr,
-    ) -> Result<CreateRecordResult> {
-        let created = request
+    ) -> Result<()> {
+        let response = request
             .post(format!("{}/dns/create/{}", self.api_url, domain.name))
             .json(&CreateRecordBody {
                 secretapikey: self.secret_api_key.expose_secret(),
@@ -195,18 +187,72 @@ impl Porkbun {
                 notes: &domain.notes,
             })
             .send()
-            .await?
-            .json::<CreateRecordResult>()
             .await?;
-        match created.status {
-            ResponseStatus::Error => Err(anyhow!(
-                "failed to create Porkbun domain ({}) record, error: {:?}",
-                domain.name,
-                created.message,
-            )),
-            ResponseStatus::Success => Ok(created),
+        parse_porkbun_response::<EmptyResult>(
+            response,
+            &format!("create Porkbun domain ({}) record", domain.name),
+        )
+        .await?;
+        Ok(())
+    }
+}
+
+async fn parse_porkbun_response<T>(response: Response, action: &str) -> Result<PorkbunResponse<T>>
+where
+    T: DeserializeOwned,
+{
+    let status = response.status();
+    let body = response.text().await?;
+    let parsed = serde_json::from_str::<PorkbunResponse<T>>(&body);
+
+    if !status.is_success() {
+        let detail = parsed
+            .as_ref()
+            .ok()
+            .and_then(|response| response.message.as_deref())
+            .filter(|message| !message.is_empty())
+            .map(str::to_owned)
+            .or_else(|| body_snippet(&body));
+        let detail = detail.map_or_else(String::new, |detail| format!(": {detail}"));
+
+        return Err(anyhow!("failed to {action}: HTTP {status}{detail}"));
+    }
+
+    let parsed = parsed
+        .map_err(|error| anyhow!("failed to parse Porkbun response for {action}: {error}"))?;
+    if parsed.status == ResponseStatus::Error {
+        let detail = parsed
+            .message
+            .as_deref()
+            .filter(|message| !message.is_empty())
+            .unwrap_or("Porkbun API returned status=ERROR");
+        return Err(anyhow!("failed to {action}: {detail}"));
+    }
+
+    Ok(parsed)
+}
+
+fn body_snippet(body: &str) -> Option<String> {
+    const MAX_BODY_CHARS: usize = 200;
+
+    let body = body.trim();
+    if body.is_empty() {
+        return None;
+    }
+
+    let mut end = body.len();
+    for (count, (index, _)) in body.char_indices().enumerate() {
+        if count == MAX_BODY_CHARS {
+            end = index;
+            break;
         }
     }
+
+    let mut snippet = body[..end].to_string();
+    if end < body.len() {
+        snippet.push_str("...");
+    }
+    Some(snippet)
 }
 
 #[async_trait]
@@ -304,8 +350,60 @@ mod tests {
         let error = provider.update(UPDATE_BOTH, http).await.unwrap_err();
         assert_eq!(
             error.to_string(),
-            "failed to list Porkbun domain (example.com) records, error: Some(\"Invalid API key. (001)\")"
+            "failed to list Porkbun domain (example.com) records: HTTP 400 Bad Request: Invalid API key. (001)"
         );
+    }
+
+    #[tokio::test]
+    async fn test_porkbun_rejects_non_success_http_status() {
+        let mock = MockServer::start().await;
+        let http: HttpClient = ClientBuilder::new(InnerHttpClient::new()).build();
+
+        let provider = Porkbun {
+            api_key: "api_key".into(),
+            secret_api_key: "secret_key".into(),
+            domains: smallvec![Domain {
+                name: "example.com".into(),
+                subdomain: None,
+                ttl: 600,
+                notes: "Created by DDRS".into(),
+            }],
+            api_url: mock.uri(),
+        };
+
+        Mock::given(method("POST"))
+            .and(path("/dns/retrieveByNameType/example.com/A"))
+            .and(body_json(json!({
+                "secretapikey": provider.secret_api_key.expose_secret(),
+                "apikey": provider.api_key.expose_secret(),
+            })))
+            .respond_with(ResponseTemplate::new(500).set_body_json(json!({
+                "status": "SUCCESS",
+                "records": [
+                    {
+                        "id": "106926659",
+                        "name": "www.example.com",
+                        "type": "A",
+                        "content": "1.1.1.1",
+                        "ttl": "600",
+                        "prio": "0",
+                        "notes": ""
+                    }
+                ]
+            })))
+            .expect(1)
+            .mount(&mock)
+            .await;
+
+        let error = provider.update(UPDATE_BOTH, http).await.unwrap_err();
+        let message = error.to_string();
+        assert!(
+            message.contains(
+                "failed to list Porkbun domain (example.com) records: HTTP 500 Internal Server Error"
+            ),
+            "{message}"
+        );
+        assert!(message.contains("SUCCESS"), "{message}");
     }
 
     #[tokio::test]
@@ -326,7 +424,7 @@ mod tests {
                 "secretapikey": provider.secret_api_key.expose_secret(),
                 "apikey": provider.api_key.expose_secret(),
             })))
-            .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "status": "SUCCESS",
                 "records": [
                     {
@@ -373,7 +471,7 @@ mod tests {
                 "secretapikey": provider.secret_api_key.expose_secret(),
                 "apikey": provider.api_key.expose_secret(),
             })))
-            .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "status": "SUCCESS",
                 "records": [
                     {
@@ -397,7 +495,7 @@ mod tests {
                 "secretapikey": provider.secret_api_key.expose_secret(),
                 "apikey": provider.api_key.expose_secret(),
             })))
-            .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "status": "SUCCESS",
                 "records": [
                     {
@@ -475,7 +573,7 @@ mod tests {
                 "secretapikey": provider.secret_api_key.expose_secret(),
                 "apikey": provider.api_key.expose_secret(),
             })))
-            .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "status": "SUCCESS",
                 "records": [
                     {
@@ -537,7 +635,7 @@ mod tests {
                 "secretapikey": provider.secret_api_key.expose_secret(),
                 "apikey": provider.api_key.expose_secret(),
             })))
-            .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "status": "SUCCESS",
                 "records": [
                     {
@@ -598,7 +696,7 @@ mod tests {
                 "secretapikey": provider.secret_api_key.expose_secret(),
                 "apikey": provider.api_key.expose_secret(),
             })))
-            .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "status": "SUCCESS",
                 "records": []
             })))
@@ -612,7 +710,7 @@ mod tests {
                 "secretapikey": provider.secret_api_key.expose_secret(),
                 "apikey": provider.api_key.expose_secret(),
             })))
-            .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "status": "SUCCESS",
                 "records": []
             })))
