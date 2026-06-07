@@ -71,11 +71,13 @@ impl Default for RawConfig {
                 parse_default_url("https://api.ipify.org"),
                 parse_default_url("https://ipv4.seeip.org"),
                 parse_default_url("https://ipv4.icanhazip.com"),
+                parse_default_url("https://4.ident.me"),
             ],
             http_ipv6: smallvec![
                 parse_default_url("https://api6.ipify.org"),
                 parse_default_url("https://ipv6.seeip.org"),
                 parse_default_url("https://ipv6.icanhazip.com"),
+                parse_default_url("https://6.ident.me"),
             ],
             providers: smallvec![],
         }
@@ -285,8 +287,8 @@ name = "example.com"
         assert_eq!(config.retries.get(), 1);
         assert!(config.versions.contains(IpVersion::V4));
         assert!(!config.versions.contains(IpVersion::V6));
-        assert_eq!(config.http_ipv4.len(), 3);
-        assert_eq!(config.http_ipv6.len(), 3);
+        assert_eq!(config.http_ipv4.len(), 4);
+        assert_eq!(config.http_ipv6.len(), 4);
         assert_eq!(config.providers.len(), 1);
     }
 
