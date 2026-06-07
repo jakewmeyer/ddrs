@@ -57,6 +57,34 @@ impl IpUpdate {
         let v6 = self.v6.map(|addr| (IpVersion::V6, IpAddr::V6(addr)));
         [v4, v6].into_iter().flatten()
     }
+
+    fn is_empty(&self) -> bool {
+        self.v4.is_none() && self.v6.is_none()
+    }
+
+    fn changed_since(&self, cached: Option<&Self>) -> Self {
+        Self {
+            v4: self
+                .v4
+                .filter(|observed| cached.and_then(|cached| cached.v4) != Some(*observed)),
+            v6: self
+                .v6
+                .filter(|observed| cached.and_then(|cached| cached.v6) != Some(*observed)),
+        }
+    }
+
+    fn merge_into_cache(self, cached: Option<Self>) -> Self {
+        let mut merged = cached.unwrap_or(Self { v4: None, v6: None });
+
+        if self.v4.is_some() {
+            merged.v4 = self.v4;
+        }
+        if self.v6.is_some() {
+            merged.v6 = self.v6;
+        }
+
+        merged
+    }
 }
 
 impl Display for IpUpdate {
@@ -161,7 +189,7 @@ impl Client {
                     }
                     _ = interval.tick() => {
                         debug!("Checking IP address...");
-                        let mut update = IpUpdate {
+                        let mut observed = IpUpdate {
                             v4: None,
                             v6: None,
                         };
@@ -174,12 +202,12 @@ impl Client {
                                 Ok(ip) => match version {
                                     IpVersion::V4 => {
                                         if let IpAddr::V4(ip) = ip {
-                                            update.v4 = Some(ip);
+                                            observed.v4 = Some(ip);
                                         }
                                     },
                                     IpVersion::V6 => {
                                          if let IpAddr::V6(ip) = ip {
-                                            update.v6 = Some(ip);
+                                            observed.v6 = Some(ip);
                                         }
                                     }
                                 },
@@ -188,20 +216,30 @@ impl Client {
                                 }
                             }
                         }
-                        if update.v4.is_none() && update.v6.is_none() {
+                        if observed.is_empty() {
                             error!("Failed to fetch IP address, skipping update...");
                             continue;
                         }
 
-                        debug!("Found IP(s): {update}");
-                        match self.cache.get().await {
-                            Ok(Some(cached)) if update == cached => {
-                                debug!("No IP address cache change detected, skipping update...");
-                                continue;
+                        debug!("Found IP(s): {observed}");
+                        let cached = match self.cache.get().await {
+                            Ok(cached) => cached,
+                            Err(e) => {
+                                warn!("Failed to read cache: {}, updating with IP(s): {observed}", e);
+                                None
                             }
-                            Ok(None) => debug!("No cached IP found, updating with IP(s): {update}"),
-                            Ok(Some(_)) => debug!("Cached IP change detected, updating with IP(s): {update}"),
-                            Err(e) => warn!("Failed to read cache: {}, updating with IP(s): {update}", e),
+                        };
+                        let update = observed.changed_since(cached.as_ref());
+                        if update.is_empty() {
+                            debug!("No IP address cache change detected, skipping update...");
+                            continue;
+                        }
+                        let had_cached = cached.is_some();
+                        let next_cache = observed.merge_into_cache(cached);
+                        if had_cached {
+                            debug!("Cached IP change detected, updating with IP(s): {update}");
+                        } else {
+                            debug!("No cached IP found, updating with IP(s): {update}");
                         }
 
                         if self.config.dry_run {
@@ -209,33 +247,9 @@ impl Client {
                             continue;
                         }
 
-                        let mut set = JoinSet::new();
-                        for provider in &self.config.providers {
-                            let provider = provider.clone();
-                            let update = update.clone();
-                            let request = self.request.clone();
-                            set.spawn(async move {
-                                provider.update(update, request).await
-                            });
-                        }
-                        let mut failed = false;
-                        while let Some(result) = set.join_next().await {
-                            match result {
-                                Ok(result) => {
-                                    if let Err(error) = result {
-                                        error!("Error updating provider: {error}");
-                                        failed = true;
-                                    }
-                                },
-                                Err(error) => {
-                                    error!("Provider task failed to complete: {error}");
-                                    failed = true;
-                                }
-                            }
-                        }
-                        if !failed {
+                        if self.update_providers(update).await {
                             info!("All providers updated successfully");
-                            if let Err(e) = self.cache.set(update).await {
+                            if let Err(e) = self.cache.set(next_cache).await {
                                 warn!("Failed to update cache: {}", e);
                             }
                         }
@@ -244,6 +258,33 @@ impl Client {
             }
             Ok(())
         })
+    }
+
+    async fn update_providers(&self, update: IpUpdate) -> bool {
+        let mut set = JoinSet::new();
+        for provider in &self.config.providers {
+            let provider = provider.clone();
+            let update = update.clone();
+            let request = self.request.clone();
+            set.spawn(async move { provider.update(update, request).await });
+        }
+
+        let mut failed = false;
+        while let Some(result) = set.join_next().await {
+            match result {
+                Ok(result) => {
+                    if let Err(error) = result {
+                        error!("Error updating provider: {error}");
+                        failed = true;
+                    }
+                }
+                Err(error) => {
+                    error!("Provider task failed to complete: {error}");
+                    failed = true;
+                }
+            }
+        }
+        !failed
     }
 
     /// Trigger a graceful shutdown of the client
@@ -288,5 +329,93 @@ fn parse_ip_for_version(version: IpVersion, body: &str) -> Result<IpAddr> {
             .parse::<Ipv6Addr>()
             .map(IpAddr::V6)
             .context("expected IPv6 address"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::{Ipv4Addr, Ipv6Addr};
+
+    use super::IpUpdate;
+
+    const OLD_V4: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 1);
+    const NEW_V4: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 2);
+    const OLD_V6: Ipv6Addr = Ipv6Addr::LOCALHOST;
+    const NEW_V6: Ipv6Addr = Ipv6Addr::UNSPECIFIED;
+
+    #[test]
+    fn ip_update_changed_since_cache_only_keeps_observed_changes() {
+        let cached = IpUpdate {
+            v4: Some(OLD_V4),
+            v6: Some(OLD_V6),
+        };
+        let observed = IpUpdate {
+            v4: Some(NEW_V4),
+            v6: None,
+        };
+
+        assert_eq!(
+            observed.changed_since(Some(&cached)),
+            IpUpdate {
+                v4: Some(NEW_V4),
+                v6: None,
+            }
+        );
+    }
+
+    #[test]
+    fn ip_update_changed_since_cache_skips_unchanged_values() {
+        let cached = IpUpdate {
+            v4: Some(OLD_V4),
+            v6: Some(OLD_V6),
+        };
+        let observed = IpUpdate {
+            v4: Some(OLD_V4),
+            v6: Some(NEW_V6),
+        };
+
+        assert_eq!(
+            observed.changed_since(Some(&cached)),
+            IpUpdate {
+                v4: None,
+                v6: Some(NEW_V6),
+            }
+        );
+    }
+
+    #[test]
+    fn ip_update_merge_into_cache_preserves_unobserved_cached_values() {
+        let cached = IpUpdate {
+            v4: Some(OLD_V4),
+            v6: Some(OLD_V6),
+        };
+        let observed = IpUpdate {
+            v4: Some(NEW_V4),
+            v6: None,
+        };
+
+        assert_eq!(
+            observed.merge_into_cache(Some(cached)),
+            IpUpdate {
+                v4: Some(NEW_V4),
+                v6: Some(OLD_V6),
+            }
+        );
+    }
+
+    #[test]
+    fn ip_update_merge_into_cache_uses_observed_values_without_cache() {
+        let observed = IpUpdate {
+            v4: None,
+            v6: Some(NEW_V6),
+        };
+
+        assert_eq!(
+            observed.merge_into_cache(None),
+            IpUpdate {
+                v4: None,
+                v6: Some(NEW_V6),
+            }
+        );
     }
 }
