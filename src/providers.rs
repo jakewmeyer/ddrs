@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use dyn_clone::DynClone;
 use reqwest_middleware::ClientWithMiddleware as HttpClient;
 
-use crate::client::IpUpdate;
+use crate::ip::IpUpdate;
 
 mod cloudflare;
 mod duckdns;

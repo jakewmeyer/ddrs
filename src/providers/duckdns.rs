@@ -7,7 +7,7 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use smallvec::SmallVec;
 
-use crate::client::IpUpdate;
+use crate::ip::IpUpdate;
 use crate::providers::Provider;
 
 #[derive(Debug, Clone, Deserialize, Default)]

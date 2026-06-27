@@ -11,7 +11,7 @@ use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use smallvec::SmallVec;
 
-use crate::client::{IpUpdate, IpVersion};
+use crate::ip::{IpUpdate, IpVersion};
 use crate::providers::Provider;
 
 /// Cloudflare DNS update provider

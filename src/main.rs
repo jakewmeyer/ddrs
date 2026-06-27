@@ -17,6 +17,7 @@ const CONFIG_PATH: &str = "/etc/ddrs/config.toml";
 mod cache;
 mod client;
 mod config;
+mod ip;
 mod providers;
 
 #[derive(Parser, Debug)]
