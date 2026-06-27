@@ -48,7 +48,8 @@ impl Client {
             .timeout(config.timeout.get())
             .connect_timeout(config.connect_timeout.get())
             .user_agent(USER_AGENT)
-            .http2_adaptive_window(true)
+            .pool_max_idle_per_host(1)
+            .pool_idle_timeout(Duration::from_mins(1))
             .build()
             .context("failed to build HTTP client")?;
         let retry_policy =
