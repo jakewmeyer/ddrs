@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated Cloudflare, DuckDNS, and Porkbun provider response handling to fail on HTTP errors
 - Added startup provider config validation and improved config parse errors
 - Updated client startup and loop handling to convert panics into errors and skip missed ticks
+- Changed the default update interval from `30s` to `60s`
+- Updated CI to publish version-tagged Docker images to GHCR
 - Updated Rust and Docker toolchains and dependencies
 
 ### Fixed
