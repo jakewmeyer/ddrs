@@ -24,7 +24,7 @@ The configuration file is in [TOML](https://toml.io/en/) format. The default loc
 
 ### Config Structure
 * `versions` - IP version to fetch and update
-* `interval` - Interval to run the update loop (default: `30s`)
+* `interval` - Interval to run the update loop (default: `60s`)
 * `timeout` - Total request timeout for HTTP requests (default: `10s`)
 * `connect_timeout` - Connect timeout for HTTP requests (default: `5s`)
 * `cache_path` - Path to the cache directory for storing last known IP update (default: `/var/cache/ddrs`)
@@ -44,7 +44,7 @@ versions = ["v4"]
 
 # versions = ["v4", "v6"]
 
-interval = "30s"
+interval = "60s"
 
 timeout = "10s"
 

@@ -64,7 +64,7 @@ struct RawConfig {
 impl Default for RawConfig {
     fn default() -> Self {
         Self {
-            interval: Duration::from_secs(30),
+            interval: Duration::from_mins(1),
             source: IpSource::Http,
             versions: smallvec![IpVersion::V4],
             dry_run: false,
@@ -332,7 +332,7 @@ name = "example.com"
     fn parses_minimal_config_with_defaults() {
         let config = parse_config("").unwrap();
 
-        assert_eq!(config.interval.get(), Duration::from_secs(30));
+        assert_eq!(config.interval.get(), Duration::from_mins(1));
         assert_eq!(config.timeout.get(), Duration::from_secs(10));
         assert_eq!(config.connect_timeout.get(), Duration::from_secs(5));
         assert_eq!(config.cache_path, PathBuf::from("/var/cache/ddrs"));
