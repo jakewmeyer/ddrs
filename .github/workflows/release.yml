@@ -55,7 +55,7 @@ jobs:
           args: "--release --locked"
           strip: true
       - name: Publish artifacts and release
-        uses: houseabsolute/actions-rust-release@v0
+        uses: houseabsolute/actions-rust-release@v1
         with:
           executable-name: ddrs
           changes-file: CHANGELOG.md
