@@ -18,6 +18,7 @@ mod cache;
 mod client;
 mod config;
 mod ip;
+mod ip_lookup;
 mod providers;
 
 #[derive(Parser, Debug)]
