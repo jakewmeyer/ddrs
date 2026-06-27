@@ -32,6 +32,7 @@ use crc32fast::Hasher;
 use rmp_serde::Serializer;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+use smallvec::SmallVec;
 use tempfile::NamedTempFile;
 use tokio::fs;
 use tokio::{
@@ -131,29 +132,16 @@ impl Cache {
         }
         let data_length = u32::try_from(data.len())?;
 
-        // Build header
-        let buf_size = HEADER_SIZE + data.len() + std::mem::size_of::<u32>();
-        let mut buf: Vec<u8> = Vec::with_capacity(buf_size);
-        buf.extend_from_slice(MAGIC_IDENTIFIER);
-        buf.extend_from_slice(&VERSION.to_be_bytes());
-        buf.extend_from_slice(&FLAGS.to_be_bytes());
-        buf.extend_from_slice(&data_length.to_be_bytes());
+        let header = build_header(data_length);
 
-        // Write header checksum
-        let mut hasher = Hasher::new();
-        hasher.update(&buf);
-        let checksum = hasher.finalize();
-        buf.extend_from_slice(&checksum.to_be_bytes());
-
-        // Write data + checksum
-        buf.extend_from_slice(&data);
         let mut hasher = Hasher::new();
         hasher.update(&data);
-        let checksum = hasher.finalize();
-        buf.extend_from_slice(&checksum.to_be_bytes());
+        let data_checksum = hasher.finalize().to_be_bytes();
 
         // Write atomically
-        file.write_all(&buf).await?;
+        file.write_all(&header).await?;
+        file.write_all(&data).await?;
+        file.write_all(&data_checksum).await?;
         file.flush().await?;
         file.sync_all().await?;
         fs::rename(tmp_path, &self.path).await?;
@@ -177,7 +165,7 @@ impl Cache {
             ));
         }
 
-        let mut header_buffer = vec![0u8; HEADER_SIZE];
+        let mut header_buffer = [0u8; HEADER_SIZE];
         if let Err(e) = file.read_exact(&mut header_buffer).await {
             if e.kind() == ErrorKind::UnexpectedEof {
                 return Err(anyhow!(
@@ -252,6 +240,26 @@ impl Cache {
         let item = rmp_serde::from_slice(&data)?;
 
         Ok(Some(item))
+    }
+}
+
+fn build_header(data_length: u32) -> [u8; HEADER_SIZE] {
+    let mut header = SmallVec::<[u8; HEADER_SIZE]>::new();
+    header.extend_from_slice(MAGIC_IDENTIFIER);
+    header.extend_from_slice(&VERSION.to_be_bytes());
+    header.extend_from_slice(&FLAGS.to_be_bytes());
+    header.extend_from_slice(&data_length.to_be_bytes());
+
+    let mut hasher = Hasher::new();
+    hasher.update(&header);
+    header.extend_from_slice(&hasher.finalize().to_be_bytes());
+
+    match header.into_inner() {
+        Ok(header) => header,
+        Err(header) => panic!(
+            "cache header should be exactly {HEADER_SIZE} bytes, got {}",
+            header.len()
+        ),
     }
 }
 
