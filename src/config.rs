@@ -5,7 +5,8 @@ use serde::{Deserialize, de};
 use smallvec::{SmallVec, smallvec};
 use url::Url;
 
-use crate::client::{IpSource, IpVersion, Provider};
+use crate::client::{IpSource, IpVersion};
+use crate::providers::Provider;
 
 const MAX_RETRIES: u32 = 10;
 

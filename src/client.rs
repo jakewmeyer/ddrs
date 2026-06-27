@@ -1,7 +1,5 @@
 use anyhow::{Context, Result, anyhow};
-use async_trait::async_trait;
 use core::fmt;
-use dyn_clone::DynClone;
 use local_ip_address::list_afinet_netifas;
 use reqwest::{Client as InnerHttpClient, Response};
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware as HttpClient};
@@ -9,7 +7,7 @@ use reqwest_retry::RetryTransientMiddleware;
 use reqwest_retry::policies::ExponentialBackoff;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::fmt::{Debug, Display, Formatter};
+use std::fmt::{Display, Formatter};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 use std::time::Duration;
@@ -108,17 +106,6 @@ impl Display for IpUpdate {
         )
     }
 }
-
-/// Provider trait for updating DNS records or DDNS services
-#[async_trait]
-#[typetag::deserialize(tag = "type")]
-pub trait Provider: Debug + DynClone + Send + Sync {
-    fn validate_config(&self) -> Result<()>;
-
-    async fn update(&self, update: IpUpdate, request: HttpClient) -> Result<bool>;
-}
-
-dyn_clone::clone_trait_object!(Provider);
 
 /// DDRS client
 #[derive(Debug)]

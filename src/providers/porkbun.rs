@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::json;
 use smallvec::SmallVec;
 
-use crate::client::{IpUpdate, IpVersion, Provider};
+use crate::client::{IpUpdate, IpVersion};
+use crate::providers::Provider;
 
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct Porkbun {
