@@ -2,6 +2,7 @@
 
 ## Features
 * IP lookups via HTTP(S) endpoints or local network interfaces
+* HTTP lookup quorum support before DNS provider updates
 * Support for multiple DNS providers
 * Support for multiple domains and subdomains
 * Support for IPv4, IPv6, or dual-stack updates
@@ -29,6 +30,7 @@ The configuration file is in [TOML](https://toml.io/en/) format. The default loc
 * `cache_path` - Path to the cache directory for storing last known IP update (default: `/var/cache/ddrs`)
 * `retries` - Number of retries for IP lookup and provider requests (default: `1`)
 * `dry_run` - Fetch the IP address but do not update the DNS records
+* `http_lookup_quorum` - Number of matching HTTP lookup responses required before accepting an IP address; must be at least a majority of the selected lookup URLs and no greater than the URL count (default: `2`)
 * `http_ipv4` - A list of HTTP(S) URLs to use for IPv4 lookups
 * `http_ipv6` - A list of HTTP(S) URLs to use for IPv6 lookups
 * `source` - The source to use for IP lookups
@@ -52,16 +54,18 @@ dry_run = false
 
 retries = 1
 
+http_lookup_quorum = 2
+
 http_ipv4 = [
   "https://api.ipify.org",
-  "https://ipv4.seeip.org",
   "https://ipv4.icanhazip.com",
+  "https://4.ident.me",
 ]
 
 http_ipv6 = [
   "https://api6.ipify.org",
-  "https://ipv6.seeip.org",
   "https://ipv6.icanhazip.com",
+  "https://6.ident.me",
 ]
 
 [source]

@@ -29,6 +29,8 @@ pub struct Config {
     pub cache_path: PathBuf,
     /// HTTP request max retries
     pub retries: RetryCount,
+    /// Matching HTTP lookup responses required before accepting an IP
+    pub http_lookup_quorum: HttpLookupQuorum,
     /// HTTP servers for IPv4 address checks
     pub http_ipv4: SmallVec<[Url; 3]>,
     /// HTTP servers for IPv6 address checks
@@ -51,6 +53,7 @@ struct RawConfig {
     connect_timeout: Duration,
     cache_path: PathBuf,
     retries: u32,
+    http_lookup_quorum: usize,
     http_ipv4: SmallVec<[Url; 3]>,
     http_ipv6: SmallVec<[Url; 3]>,
     providers: SmallVec<[Box<dyn Provider>; 1]>,
@@ -67,15 +70,14 @@ impl Default for RawConfig {
             connect_timeout: Duration::from_secs(5),
             cache_path: "/var/cache/ddrs".into(),
             retries: 1,
+            http_lookup_quorum: 2,
             http_ipv4: smallvec![
                 parse_default_url("https://api.ipify.org"),
-                parse_default_url("https://ipv4.seeip.org"),
                 parse_default_url("https://ipv4.icanhazip.com"),
                 parse_default_url("https://4.ident.me"),
             ],
             http_ipv6: smallvec![
                 parse_default_url("https://api6.ipify.org"),
-                parse_default_url("https://ipv6.seeip.org"),
                 parse_default_url("https://ipv6.icanhazip.com"),
                 parse_default_url("https://6.ident.me"),
             ],
@@ -98,6 +100,7 @@ impl TryFrom<RawConfig> for Config {
 
         let versions = IpVersions::new(raw.versions)?;
         let retries = RetryCount::new(raw.retries)?;
+        let http_lookup_quorum = HttpLookupQuorum::new(raw.http_lookup_quorum)?;
 
         ensure_http_urls("http_ipv4", &raw.http_ipv4)?;
         ensure_http_urls("http_ipv6", &raw.http_ipv6)?;
@@ -108,10 +111,16 @@ impl TryFrom<RawConfig> for Config {
                     "http_ipv4 must not be empty when source is http and versions includes v4"
                 ));
             }
+            if versions.contains(IpVersion::V4) {
+                ensure_http_lookup_quorum("http_ipv4", &raw.http_ipv4, http_lookup_quorum)?;
+            }
             if versions.contains(IpVersion::V6) && raw.http_ipv6.is_empty() {
                 return Err(anyhow!(
                     "http_ipv6 must not be empty when source is http and versions includes v6"
                 ));
+            }
+            if versions.contains(IpVersion::V6) {
+                ensure_http_lookup_quorum("http_ipv6", &raw.http_ipv6, http_lookup_quorum)?;
             }
         }
 
@@ -128,6 +137,7 @@ impl TryFrom<RawConfig> for Config {
             connect_timeout,
             cache_path: raw.cache_path,
             retries,
+            http_lookup_quorum,
             http_ipv4: raw.http_ipv4,
             http_ipv6: raw.http_ipv6,
             providers: raw.providers,
@@ -239,6 +249,22 @@ impl RetryCount {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HttpLookupQuorum(usize);
+
+impl HttpLookupQuorum {
+    fn new(value: usize) -> Result<Self> {
+        if value == 0 {
+            return Err(anyhow!("http_lookup_quorum must be greater than 0"));
+        }
+        Ok(Self(value))
+    }
+
+    pub fn get(self) -> usize {
+        self.0
+    }
+}
+
 fn ensure_http_urls(field: &str, urls: &[Url]) -> Result<()> {
     for url in urls {
         match url.scheme() {
@@ -247,6 +273,30 @@ fn ensure_http_urls(field: &str, urls: &[Url]) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn ensure_http_lookup_quorum(
+    field: &str,
+    urls: &[Url],
+    http_lookup_quorum: HttpLookupQuorum,
+) -> Result<()> {
+    let url_count = urls.len();
+    if http_lookup_quorum.get() > url_count {
+        return Err(anyhow!(
+            "http_lookup_quorum must not be greater than {field} URL count ({url_count})"
+        ));
+    }
+    let majority = http_lookup_majority(url_count);
+    if http_lookup_quorum.get() < majority {
+        return Err(anyhow!(
+            "http_lookup_quorum must be at least a majority of {field} URLs ({majority} for {url_count})"
+        ));
+    }
+    Ok(())
+}
+
+fn http_lookup_majority(url_count: usize) -> usize {
+    (url_count / 2) + 1
 }
 
 fn parse_default_url(url: &str) -> Url {
@@ -285,10 +335,11 @@ name = "example.com"
         assert_eq!(config.connect_timeout.get(), Duration::from_secs(5));
         assert_eq!(config.cache_path, PathBuf::from("/var/cache/ddrs"));
         assert_eq!(config.retries.get(), 1);
+        assert_eq!(config.http_lookup_quorum.get(), 2);
         assert!(config.versions.contains(IpVersion::V4));
         assert!(!config.versions.contains(IpVersion::V6));
-        assert_eq!(config.http_ipv4.len(), 4);
-        assert_eq!(config.http_ipv6.len(), 4);
+        assert_eq!(config.http_ipv4.len(), 3);
+        assert_eq!(config.http_ipv6.len(), 3);
         assert_eq!(config.providers.len(), 1);
     }
 
@@ -414,5 +465,66 @@ name = ""
         let error = parse_error("retries = 11");
 
         assert!(error.contains("retries must not be greater than 10"));
+    }
+
+    #[test]
+    fn rejects_zero_http_lookup_quorum() {
+        let error = parse_error("http_lookup_quorum = 0");
+
+        assert!(error.contains("http_lookup_quorum must be greater than 0"));
+    }
+
+    #[test]
+    fn rejects_http_lookup_quorum_above_selected_http_url_count() {
+        let v4_error = parse_error("http_lookup_quorum = 4");
+        let v6_error = parse_error(
+            r#"
+versions = ["v6"]
+http_lookup_quorum = 4
+"#,
+        );
+
+        assert!(
+            v4_error
+                .contains("http_lookup_quorum must not be greater than http_ipv4 URL count (3)")
+        );
+        assert!(
+            v6_error
+                .contains("http_lookup_quorum must not be greater than http_ipv6 URL count (3)")
+        );
+    }
+
+    #[test]
+    fn rejects_http_lookup_quorum_below_selected_http_url_majority() {
+        let v4_error = parse_error(
+            r#"
+http_lookup_quorum = 2
+http_ipv4 = [
+  "https://one.example.com",
+  "https://two.example.com",
+  "https://three.example.com",
+  "https://four.example.com",
+]
+"#,
+        );
+        let v6_error = parse_error(
+            r#"
+versions = ["v6"]
+http_lookup_quorum = 2
+http_ipv6 = [
+  "https://one.example.com",
+  "https://two.example.com",
+  "https://three.example.com",
+  "https://four.example.com",
+]
+"#,
+        );
+
+        assert!(v4_error.contains(
+            "http_lookup_quorum must be at least a majority of http_ipv4 URLs (3 for 4)"
+        ));
+        assert!(v6_error.contains(
+            "http_lookup_quorum must be at least a majority of http_ipv6 URLs (3 for 4)"
+        ));
     }
 }

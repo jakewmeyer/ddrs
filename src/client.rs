@@ -8,6 +8,7 @@ use reqwest_middleware::{ClientBuilder, ClientWithMiddleware as HttpClient};
 use reqwest_retry::RetryTransientMiddleware;
 use reqwest_retry::policies::ExponentialBackoff;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
@@ -29,6 +30,15 @@ const MAX_IP_LOOKUP_BODY_BYTES: usize = 256;
 pub enum IpVersion {
     V4,
     V6,
+}
+
+impl Display for IpVersion {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self {
+            Self::V4 => f.write_str("IPv4"),
+            Self::V6 => f.write_str("IPv6"),
+        }
+    }
 }
 
 /// IP interface source serde representation
@@ -147,25 +157,66 @@ impl Client {
             IpVersion::V4 => &self.config.http_ipv4,
             IpVersion::V6 => &self.config.http_ipv6,
         };
-        let mut last_err: Option<anyhow::Error> = None;
+        let threshold = self.config.http_lookup_quorum.get();
+        let url_count = urls.len();
+        let mut set = JoinSet::new();
         for url in urls {
-            match self.request.get(url.as_str()).send().await {
-                Ok(response) => {
-                    match parse_ip_lookup_response(response, version, url.as_str()).await {
-                        Ok(ip) => return Ok(ip),
-                        Err(error) => {
-                            debug!("IP lookup failed for {url}: {error}");
-                            last_err = Some(error);
-                        }
+            let request = self.request.clone();
+            let url = url.clone();
+            set.spawn(async move {
+                let response = request
+                    .get(url.as_str())
+                    .send()
+                    .await
+                    .with_context(|| format!("HTTP request failed for {url}"))?;
+                parse_ip_lookup_response(response, version, url.as_str()).await
+            });
+        }
+
+        let mut votes = BTreeMap::new();
+        let mut failures = 0;
+        let mut failure_details = Vec::new();
+        while let Some(result) = set.join_next().await {
+            match result {
+                Ok(Ok(ip)) => {
+                    let vote_count = {
+                        let count = votes.entry(ip).or_insert(0);
+                        *count += 1;
+                        *count
+                    };
+                    if vote_count >= threshold {
+                        let checked = votes.values().sum::<usize>() + failures;
+                        debug!(
+                            "IP lookup quorum reached for {version}: {ip} ({vote_count}/{checked} responses, {threshold}/{url_count} required)"
+                        );
+                        set.abort_all();
+                        return Ok(ip);
                     }
                 }
-                Err(e) => {
-                    debug!("HTTP request failed for {}: {}", url, e);
-                    last_err = Some(e.into());
+                Ok(Err(error)) => {
+                    debug!("IP lookup failed for {version}: {error}");
+                    failure_details.push(error.to_string());
+                    failures += 1;
+                }
+                Err(error) => {
+                    debug!("IP lookup task failed for {version}: {error}");
+                    failure_details.push(error.to_string());
+                    failures += 1;
                 }
             }
         }
-        Err(last_err.unwrap_or_else(|| anyhow!("failed to fetch IP address from HTTP")))
+
+        match resolve_ip_quorum(votes, failures, threshold) {
+            IpQuorumResult::Reached { ip, votes, checked } => {
+                debug!("IP lookup quorum reached for {version}: {ip} ({votes}/{checked})");
+                Ok(ip)
+            }
+            IpQuorumResult::NotReached { votes, failures } => Err(anyhow!(
+                "no HTTP IP lookup quorum reached for {version}: required {threshold} matching responses from {url_count} URLs, votes [{}], failures {failures}{}",
+                format_ip_votes(&votes),
+                format_failure_details(&failure_details)
+            )),
+        }
     }
 
     /// Starts the client
@@ -382,13 +433,75 @@ fn response_body_detail(body: &str) -> String {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum IpQuorumResult {
+    Reached {
+        ip: IpAddr,
+        votes: usize,
+        checked: usize,
+    },
+    NotReached {
+        votes: BTreeMap<IpAddr, usize>,
+        failures: usize,
+    },
+}
+
+fn resolve_ip_quorum(
+    votes: BTreeMap<IpAddr, usize>,
+    failures: usize,
+    threshold: usize,
+) -> IpQuorumResult {
+    let checked = votes.values().sum::<usize>() + failures;
+    let Some((ip, vote_count)) = votes.iter().max_by_key(|(_ip, count)| *count) else {
+        return IpQuorumResult::NotReached { votes, failures };
+    };
+    let ip = *ip;
+    let vote_count = *vote_count;
+
+    let tied = votes.values().filter(|&&count| count == vote_count).count() > 1;
+
+    if vote_count >= threshold && !tied {
+        IpQuorumResult::Reached {
+            ip,
+            votes: vote_count,
+            checked,
+        }
+    } else {
+        IpQuorumResult::NotReached { votes, failures }
+    }
+}
+
+fn format_ip_votes(votes: &BTreeMap<IpAddr, usize>) -> String {
+    if votes.is_empty() {
+        return "none".to_string();
+    }
+
+    votes
+        .iter()
+        .map(|(ip, count)| format!("{ip}={count}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn format_failure_details(failures: &[String]) -> String {
+    if failures.is_empty() {
+        String::new()
+    } else {
+        format!(", failure details [{}]", failures.join("; "))
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use std::net::{Ipv4Addr, Ipv6Addr};
+    use std::collections::BTreeMap;
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+    use std::time::Duration;
 
     use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
 
-    use super::{Client, IpUpdate, IpVersion, MAX_IP_LOOKUP_BODY_BYTES};
+    use super::{
+        Client, IpQuorumResult, IpUpdate, IpVersion, MAX_IP_LOOKUP_BODY_BYTES, resolve_ip_quorum,
+    };
     use crate::config::Config;
 
     const OLD_V4: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 1);
@@ -396,7 +509,7 @@ mod tests {
     const OLD_V6: Ipv6Addr = Ipv6Addr::LOCALHOST;
     const NEW_V6: Ipv6Addr = Ipv6Addr::UNSPECIFIED;
 
-    fn config_with_http_ipv4(urls: &[String]) -> Config {
+    fn config_with_http_ipv4(urls: &[String], http_lookup_quorum: usize) -> Config {
         let urls = urls
             .iter()
             .map(|url| format!("\"{url}\""))
@@ -406,6 +519,7 @@ mod tests {
         toml::from_str(&format!(
             r#"
 retries = 0
+http_lookup_quorum = {http_lookup_quorum}
 http_ipv4 = [{urls}]
 
 [[providers]]
@@ -420,23 +534,39 @@ name = "example.com"
         .unwrap()
     }
 
-    #[tokio::test]
-    async fn fetch_ip_http_rejects_non_success_status() {
-        let mock = MockServer::start().await;
-        let url = mock.uri();
-        let client = Client::new(config_with_http_ipv4(std::slice::from_ref(&url))).unwrap();
+    async fn ip_lookup_server(status: u16, body: String) -> MockServer {
+        ip_lookup_server_with_template(ResponseTemplate::new(status).set_body_string(body)).await
+    }
 
+    async fn delayed_ip_lookup_server(status: u16, body: String, delay: Duration) -> MockServer {
+        ip_lookup_server_with_template(
+            ResponseTemplate::new(status)
+                .set_body_string(body)
+                .set_delay(delay),
+        )
+        .await
+    }
+
+    async fn ip_lookup_server_with_template(response: ResponseTemplate) -> MockServer {
+        let mock = MockServer::start().await;
         Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(500).set_body_string("192.0.2.1"))
-            .expect(1)
+            .respond_with(response)
             .mount(&mock)
             .await;
+        mock
+    }
+
+    #[tokio::test]
+    async fn fetch_ip_http_rejects_non_success_status() {
+        let mock = ip_lookup_server(500, "192.0.2.1".to_string()).await;
+        let url = mock.uri();
+        let client = Client::new(config_with_http_ipv4(std::slice::from_ref(&url), 1)).unwrap();
 
         let error = client.fetch_ip_http(IpVersion::V4).await.unwrap_err();
         let message = error.to_string();
         assert!(
-            message.contains("IP lookup"),
-            "error should identify the IP lookup: {message}"
+            message.contains("no HTTP IP lookup quorum reached for IPv4"),
+            "error should identify the failed quorum: {message}"
         );
         assert!(
             message.contains(&url),
@@ -453,22 +583,12 @@ name = "example.com"
     }
 
     #[tokio::test]
-    async fn fetch_ip_http_uses_next_url_after_non_success_status() {
-        let bad = MockServer::start().await;
-        let good = MockServer::start().await;
-        let urls = [bad.uri(), good.uri()];
-        let client = Client::new(config_with_http_ipv4(&urls)).unwrap();
-
-        Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(500).set_body_string("192.0.2.1"))
-            .expect(1)
-            .mount(&bad)
-            .await;
-        Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(200).set_body_string("192.0.2.2\n"))
-            .expect(1)
-            .mount(&good)
-            .await;
+    async fn fetch_ip_http_reaches_quorum_after_non_success_status() {
+        let bad = ip_lookup_server(500, "192.0.2.1".to_string()).await;
+        let first_good = ip_lookup_server(200, "192.0.2.2\n".to_string()).await;
+        let second_good = ip_lookup_server(200, "192.0.2.2\n".to_string()).await;
+        let urls = [bad.uri(), first_good.uri(), second_good.uri()];
+        let client = Client::new(config_with_http_ipv4(&urls, 2)).unwrap();
 
         let ip = client.fetch_ip_http(IpVersion::V4).await.unwrap();
 
@@ -477,24 +597,81 @@ name = "example.com"
 
     #[tokio::test]
     async fn fetch_ip_http_rejects_oversized_body() {
-        let mock = MockServer::start().await;
+        let mock = ip_lookup_server(200, "x".repeat(MAX_IP_LOOKUP_BODY_BYTES + 1)).await;
         let url = mock.uri();
-        let client = Client::new(config_with_http_ipv4(std::slice::from_ref(&url))).unwrap();
-
-        Mock::given(method("GET"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_string("x".repeat(MAX_IP_LOOKUP_BODY_BYTES + 1)),
-            )
-            .expect(1)
-            .mount(&mock)
-            .await;
+        let client = Client::new(config_with_http_ipv4(std::slice::from_ref(&url), 1)).unwrap();
 
         let error = client.fetch_ip_http(IpVersion::V4).await.unwrap_err();
         assert!(
             error
                 .to_string()
                 .contains("IP lookup response body exceeded 256 bytes")
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_ip_http_requires_matching_quorum() {
+        let first = ip_lookup_server(200, "192.0.2.10\n".to_string()).await;
+        let second = ip_lookup_server(200, "192.0.2.10\n".to_string()).await;
+        let third = ip_lookup_server(200, "192.0.2.11\n".to_string()).await;
+        let urls = [first.uri(), second.uri(), third.uri()];
+        let client = Client::new(config_with_http_ipv4(&urls, 2)).unwrap();
+
+        let ip = client.fetch_ip_http(IpVersion::V4).await.unwrap();
+
+        assert_eq!(ip, Ipv4Addr::new(192, 0, 2, 10));
+    }
+
+    #[tokio::test]
+    async fn fetch_ip_http_returns_when_quorum_is_reached() {
+        let first = ip_lookup_server(200, "192.0.2.10\n".to_string()).await;
+        let second = ip_lookup_server(200, "192.0.2.10\n".to_string()).await;
+        let slow =
+            delayed_ip_lookup_server(200, "192.0.2.11\n".to_string(), Duration::from_secs(5)).await;
+        let urls = [first.uri(), second.uri(), slow.uri()];
+        let client = Client::new(config_with_http_ipv4(&urls, 2)).unwrap();
+
+        let ip = tokio::time::timeout(
+            Duration::from_millis(500),
+            client.fetch_ip_http(IpVersion::V4),
+        )
+        .await
+        .expect("HTTP lookup should return before the delayed response")
+        .unwrap();
+
+        assert_eq!(ip, Ipv4Addr::new(192, 0, 2, 10));
+    }
+
+    #[tokio::test]
+    async fn fetch_ip_http_rejects_split_without_majority() {
+        let first = ip_lookup_server(200, "192.0.2.10\n".to_string()).await;
+        let second = ip_lookup_server(200, "192.0.2.10\n".to_string()).await;
+        let third = ip_lookup_server(200, "192.0.2.11\n".to_string()).await;
+        let fourth = ip_lookup_server(200, "192.0.2.11\n".to_string()).await;
+        let urls = [first.uri(), second.uri(), third.uri(), fourth.uri()];
+        let client = Client::new(config_with_http_ipv4(&urls, 3)).unwrap();
+
+        let error = client.fetch_ip_http(IpVersion::V4).await.unwrap_err();
+        let message = error.to_string();
+
+        assert!(
+            message.contains("no HTTP IP lookup quorum reached for IPv4"),
+            "{message}"
+        );
+        assert!(message.contains("192.0.2.10=2"), "{message}");
+        assert!(message.contains("192.0.2.11=2"), "{message}");
+    }
+
+    #[test]
+    fn ip_quorum_rejects_tied_leaders() {
+        let votes = BTreeMap::from([
+            (IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)), 2),
+            (IpAddr::V4(Ipv4Addr::new(192, 0, 2, 11)), 2),
+        ]);
+
+        assert_eq!(
+            resolve_ip_quorum(votes.clone(), 0, 2),
+            IpQuorumResult::NotReached { votes, failures: 0 }
         );
     }
 
