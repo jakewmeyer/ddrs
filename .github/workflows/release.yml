@@ -10,47 +10,44 @@ permissions:
 
 jobs:
   build:
-    name: ${{ matrix.platform.os-name }} with rust ${{ matrix.toolchain }}
+    name: ${{ matrix.platform.os-name }}
     runs-on: ${{ matrix.platform.runs-on }}
     strategy:
       fail-fast: false
       matrix:
         platform:
           - os-name: Linux-x86_64-musl
-            runs-on: ubuntu-20.04
+            runs-on: ubuntu-24.04
             target: x86_64-unknown-linux-musl
 
           - os-name: Linux-aarch64-musl
-            runs-on: ubuntu-20.04
+            runs-on: ubuntu-24.04
             target: aarch64-unknown-linux-musl
 
           - os-name: Linux-x86_64-gnu
-            runs-on: ubuntu-20.04
+            runs-on: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
 
           - os-name: Linux-aarch64-gnu
-            runs-on: ubuntu-20.04
+            runs-on: ubuntu-24.04
             target: aarch64-unknown-linux-gnu
 
           - os-name: macOS-aarch64
-            runs-on: macOS-latest
+            runs-on: macos-15
             target: aarch64-apple-darwin
 
           - os-name: macOS-x86_64
-            runs-on: macOS-latest
+            runs-on: macos-15-intel
             target: x86_64-apple-darwin
 
           - os-name: FreeBSD-x86_64
-            runs-on: ubuntu-20.04
+            runs-on: ubuntu-24.04
             target: x86_64-unknown-freebsd
-            skip_tests: true
-        toolchain:
-          - stable
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@v2
       - name: Build binary
-        uses: houseabsolute/actions-rust-cross@v0
+        uses: houseabsolute/actions-rust-cross@v1
         with:
           command: "build"
           target: ${{ matrix.platform.target }}
@@ -63,4 +60,3 @@ jobs:
           executable-name: ddrs
           changes-file: CHANGELOG.md
           target: ${{ matrix.platform.target }}
-        if: matrix.toolchain == 'stable'
